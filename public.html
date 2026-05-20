@@ -286,6 +286,24 @@
     }
     .wb-badge { color: var(--cb-purple); border: 1px solid rgba(155,109,255,0.4); }
     .lb-badge { color: var(--cb-orange); border: 1px solid rgba(249,115,22,0.4); }
+
+    /* ── Roster Tooltip ── */
+    .team-name { position: relative; }
+    .team-name.has-roster { cursor: default; text-decoration: underline dotted rgba(167,139,250,0.45); text-underline-offset: 3px; }
+    .team-row:hover .team-name.has-roster { color: #c4b5fd !important; }
+    .roster-tooltip {
+      display: none; position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 200;
+      min-width: 160px; max-width: 240px;
+      background: #0d0d14; border: 1px solid rgba(124,58,237,0.6);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.7); padding: 8px 12px;
+      flex-direction: column; gap: 4px; pointer-events: none;
+      animation: rosterFadeIn 0.15s cubic-bezier(0.23,1,0.32,1) forwards;
+    }
+    .roster-tooltip::after { content: ""; position: absolute; top: 100%; left: 14px; border: 5px solid transparent; border-top-color: rgba(124,58,237,0.6); }
+    .team-name.has-roster:hover .roster-tooltip { display: flex; }
+    .roster-tooltip-title { font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: #a78bfa; margin-bottom: 4px; border-bottom: 1px solid rgba(124,58,237,0.3); padding-bottom: 4px; }
+    .roster-tooltip-player { font-size: 12px; font-weight: 500; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @keyframes rosterFadeIn { from { opacity:0; transform: translateY(4px) scale(0.97); } to { opacity:1; transform: translateY(0) scale(1); } }
   </style>
 </head>
 <body>
@@ -398,7 +416,18 @@
       }
 
       inner += `<span class="team-emoji">${emoji}</span>`;
-      inner += `<span class="team-name${isEmpty ? " empty" : ""}">${team.name || "— TBD —"}</span>`;
+      {
+        const hasRoster = Array.isArray(team.players) && team.players.length > 0;
+        let nameHtml = '<span class="team-name' + (isEmpty ? ' empty' : '') + (hasRoster ? ' has-roster' : '') + '">';
+        nameHtml += (team.name || '— TBD —');
+        if (hasRoster) {
+          nameHtml += '<span class="roster-tooltip"><span class="roster-tooltip-title">' + team.name + '</span>';
+          for (const p of team.players) { nameHtml += '<span class="roster-tooltip-player">▸ ' + p + '</span>'; }
+          nameHtml += '</span>';
+        }
+        nameHtml += '</span>';
+        inner += nameHtml;
+      }
       if (placementLabel) {
         inner += `<span class="placement-badge${isChampion ? " champion-badge" : ""}">${placementLabel}</span>`;
       }
