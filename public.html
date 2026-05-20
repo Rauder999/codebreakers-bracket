@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Codebreakers — Live Bracket</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;600;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Cold Steel palette (mirrors index.css) ─── */
+    :root {
+      --cb-bg:      #0a0a0a;
+      --cb-panel:   #111115;
+      --cb-border:  #222228;
+      --cb-text:    #e8e8f0;
+      --cb-muted:   #888899;
+      --cb-silver:  #b8b8cc;
+      --cb-purple:  #9b6dff;
+      --cb-green:   #22c55e;
+      --cb-orange:  #f97316;
+      --cb-gold:    #f59e0b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--cb-bg);
+      color: var(--cb-text);
+      font-family: 'Saira Condensed', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ─── Header ─── */
+    .cb-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 16px;
+      border-bottom: 1px solid var(--cb-border);
+      position: relative;
+    }
+    .cb-logo {
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      margin-bottom: 6px;
+    }
+    .cb-title {
+      font-weight: 800;
+      font-size: 28px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--cb-text);
+    }
+    .cb-subtitle {
+      font-weight: 400;
+      font-size: 11px;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      color: var(--cb-muted);
+      margin-top: 2px;
+    }
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(34,197,94,0.1);
+      border: 1px solid var(--cb-green);
+      color: var(--cb-green);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      padding: 3px 10px;
+      margin-top: 8px;
+    }
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cb-green);
+      animation: livePulse 1.4s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--cb-green); }
+      50%       { opacity: 0.3; box-shadow: none; }
+    }
+
+    /* ─── Status bar ─── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--cb-border);
+      font-size: 11px;
+      color: var(--cb-muted);
+      letter-spacing: 0.05em;
+    }
+    .refresh-btn {
+      background: transparent;
+      border: 1px solid var(--cb-border);
+      color: var(--cb-silver);
+      font-family: 'Saira Condensed', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      padding: 4px 12px;
+      cursor: pointer;
+      transition: border-color 150ms, color 150ms;
+    }
+    .refresh-btn:hover { border-color: var(--cb-silver); color: var(--cb-text); }
+
+    /* ─── Waiting screen ─── */
+    .waiting-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 40vh;
+      gap: 12px;
+      color: var(--cb-muted);
+      font-size: 14px;
+      letter-spacing: 0.08em;
+    }
+    .waiting-screen .icon { font-size: 36px; }
+
+    /* ─── Bracket container ─── */
+    .bracket-container {
+      overflow-x: auto;
+      padding: 20px 16px 40px;
+    }
+    .bracket-inner {
+      display: inline-flex;
+      flex-direction: row;
+      align-items: flex-start;
+      gap: 0;
+      min-width: max-content;
+    }
+
+    /* DE layout */
+    .de-bracket-wrapper {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto auto;
+      gap: 0;
+      min-width: max-content;
+    }
+    .de-row {
+      display: flex;
+      flex-direction: column;
+      padding: 12px 0;
+    }
+    .de-row-label {
+      font-weight: 800;
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      padding: 0 16px 8px;
+      border-bottom: 1px solid rgba(155,109,255,0.2);
+      margin-bottom: 8px;
+    }
+    .wb-row-label { color: var(--cb-purple); }
+    .lb-row-label { color: var(--cb-orange); }
+    .de-row-phases {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      padding: 12px 0;
+    }
+    .de-zone-divider {
+      grid-column: 1 / 3;
+      height: 1px;
+      background: rgba(155,109,255,0.15);
+      margin: 0;
+    }
+    .de-gf-column {
+      grid-column: 2;
+      grid-row: 1 / 4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 16px 16px 8px;
+      border-left: 1px solid rgba(245,158,11,0.2);
+      min-width: 200px;
+    }
+
+    /* ─── Phase ─── */
+    .bracket-phase {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 8px;
+    }
+    .phase-label {
+      font-weight: 800;
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--cb-purple);
+      padding-bottom: 8px;
+      text-align: center;
+    }
+    .lb-phase-label { color: var(--cb-orange) !important; }
+    .gf-phase-label { color: var(--cb-gold) !important; }
+    .pods-column {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .connector-spacer { width: 20px; flex-shrink: 0; }
+
+    /* ─── Match Pod ─── */
+    .match-pod {
+      background: var(--cb-panel);
+      border: 1px solid var(--cb-border);
+      min-width: 180px;
+      max-width: 220px;
+    }
+    .gf-pod {
+      border-color: rgba(245,158,11,0.4);
+      min-width: 200px;
+    }
+    .lb-pod { border-color: rgba(249,115,22,0.25); }
+    .pod-header {
+      font-weight: 800;
+      font-size: 9px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--cb-muted);
+      padding: 5px 8px 4px;
+      border-bottom: 1px solid var(--cb-border);
+      background: rgba(255,255,255,0.02);
+    }
+    .gf-header { color: var(--cb-gold); border-bottom-color: rgba(245,158,11,0.3); }
+    .lb-header { color: var(--cb-orange); border-bottom-color: rgba(249,115,22,0.2); }
+
+    /* ─── Team Row ─── */
+    .team-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--cb-border);
+      font-size: 13px;
+      cursor: default;
+      transition: background 120ms;
+    }
+    .team-row:last-child { border-bottom: none; }
+    .team-row.advancing {
+      border-left: 2px solid var(--cb-green);
+      background: rgba(34,197,94,0.04);
+    }
+    .team-row.dropping {
+      border-left: 2px solid var(--cb-orange);
+      background: rgba(249,115,22,0.04);
+    }
+    .team-row.eliminated {
+      opacity: 0.38;
+    }
+    .team-row.champion {
+      border-left: 2px solid var(--cb-gold);
+      background: rgba(245,158,11,0.07);
+      color: var(--cb-gold);
+    }
+
+    .team-seed-group { min-width: 38px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+    .team-seed { font-size: 11px; color: #666677; letter-spacing: 0.02em; }
+    .team-emoji { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+    .team-name { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .team-name.empty { color: var(--cb-muted); font-weight: 400; }
+    .placement-badge {
+      font-size: 10px;
+      color: var(--cb-muted);
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+    .champion-badge { color: var(--cb-gold); }
+    .path-badge {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      padding: 1px 4px;
+      flex-shrink: 0;
+    }
+    .wb-badge { color: var(--cb-purple); border: 1px solid rgba(155,109,255,0.4); }
+    .lb-badge { color: var(--cb-orange); border: 1px solid rgba(249,115,22,0.4); }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="cb-header">
+    <img src="./CODE_LOGO.png" alt="Codebreakers" class="cb-logo"
+         onerror="this.style.display='none'" />
+    <div class="cb-title">CODEBREAKERS</div>
+    <div class="cb-subtitle">TOURNAMENT BRACKET</div>
+    <div class="live-badge" id="liveBadge" style="display:none">
+      <span class="live-dot"></span>LIVE
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span id="statusText">Loading bracket…</span>
+    <button class="refresh-btn" onclick="fetchBracket()">↺ Refresh Now</button>
+  </div>
+
+  <!-- Main content -->
+  <div id="main"></div>
+
+  <script>
+    const WORKER_URL = "https://operator-api.taksatovq.workers.dev";
+    const POLL_INTERVAL = 10000;
+
+    const PLACEMENT_LABELS = { 0: "—", 1: "1st", 2: "2nd", 3: "3rd", 4: "4th" };
+    const PLACEMENT_EMOJIS = { 0: "", 1: "🥇", 2: "🥈", 3: "🥉", 4: "" };
+
+    let lastUpdated = null;
+    let pollTimer = null;
+
+    // ─── Phase ordering ───────────────────────────────────────────────────────
+    function getPhaseOrder(mode, size) {
+      if (mode === "single") {
+        if (size === 8)  return ["groups", "final", "gf"];
+        if (size === 16) return ["groups", "semis", "final", "gf"];
+        return ["groups", "quarters", "semis", "final", "gf"];
+      }
+      // double
+      if (size === 8)  return ["groups", "wb-final", "lb-r1", "lb-r2", "lb-final", "gf"];
+      if (size === 16) return ["groups", "wb-semis", "wb-final", "lb-r1", "lb-r2", "lb-semi", "lb-final", "lb-winners-final", "gf"];
+      return ["groups", "wb-r2", "wb-semis", "wb-final", "lb-r1", "lb-r2", "lb-r3", "lb-r4", "lb-semi", "lb-final", "lb-winners-final", "gf"];
+    }
+
+    const PHASE_LABELS = {
+      groups: "GROUP STAGE", quarters: "QUARTERFINALS", semis: "SEMIFINALS",
+      final: "CASH-OUT FINAL", cashout: "CASH-OUT FINAL", gf: "GRAND FINAL",
+      "wb-r2": "WB QUARTERS", "wb-semis": "WB SEMIFINALS", "wb-final": "WB FINAL",
+      "lb-r1": "LB ROUND 1", "lb-r2": "LB ROUND 2", "lb-r3": "LB ROUND 3",
+      "lb-r4": "LB ROUND 4", "lb-semi": "LB SEMIFINAL", "lb-final": "LB FINAL",
+      "lb-winners-final": "LB WINNERS FINAL",
+    };
+
+    // ─── Group pods by phase ──────────────────────────────────────────────────
+    function groupPodsByPhase(pods, mode, size) {
+      const order = getPhaseOrder(mode, size);
+      const map = new Map();
+      for (const p of pods) {
+        if (!map.has(p.phase)) map.set(p.phase, []);
+        map.get(p.phase).push(p);
+      }
+      return order
+        .filter(ph => map.has(ph))
+        .map(ph => ({
+          phase: ph,
+          label: PHASE_LABELS[ph] || ph.toUpperCase(),
+          pods: map.get(ph),
+          bracket: map.get(ph)[0]?.bracket,
+        }));
+    }
+
+    // ─── Render a single team row ─────────────────────────────────────────────
+    function renderTeamRow(team, isGF, isDE, isLB, hasNoLBDrop) {
+      const placement = team.placement || 0;
+      const isChampion = isGF && placement === 1 && team.name;
+      const isAdvancing = !isGF && (placement === 1 || placement === 2);
+      const isDropping  = isDE && !isLB && !isGF && !hasNoLBDrop && (placement === 3 || placement === 4);
+      const isEliminated = !isGF && (
+        (isLB && (placement === 3 || placement === 4)) ||
+        (!isDE && (placement === 3 || placement === 4)) ||
+        (isDE && hasNoLBDrop && (placement === 3 || placement === 4))
+      );
+      const isEmpty = !team.name;
+
+      let cls = "team-row";
+      if (isChampion)  cls += " champion";
+      else if (isAdvancing) cls += " advancing";
+      else if (isDropping)  cls += " dropping";
+      else if (isEliminated) cls += " eliminated";
+
+      const emoji = isChampion ? "👑" : (PLACEMENT_EMOJIS[placement] || "");
+      const placementLabel = placement !== 0 ? `[${PLACEMENT_LABELS[placement]}]` : "";
+
+      let inner = "";
+
+      // Seed
+      if (!isGF) {
+        inner += `<span class="team-seed-group">`;
+        if (team.seed > 0) inner += `<span class="team-seed">#${team.seed}</span>`;
+        inner += `</span>`;
+      }
+
+      // WB/LB badge in GF
+      if (isGF && isDE && team.path) {
+        const badgeCls = team.path === "wb" ? "wb-badge" : "lb-badge";
+        inner += `<span class="path-badge ${badgeCls}">[${team.path.toUpperCase()}]</span>`;
+      }
+
+      inner += `<span class="team-emoji">${emoji}</span>`;
+      inner += `<span class="team-name${isEmpty ? " empty" : ""}">${team.name || "— TBD —"}</span>`;
+      if (placementLabel) {
+        inner += `<span class="placement-badge${isChampion ? " champion-badge" : ""}">${placementLabel}</span>`;
+      }
+
+      return `<div class="${cls}">${inner}</div>`;
+    }
+
+    // ─── Render a single pod ──────────────────────────────────────────────────
+    function renderPod(pod, isGF, isDE, isLB) {
+      const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : ""].filter(Boolean).join(" ");
+      const headerCls = ["pod-header", isGF ? "gf-header" : "", isLB ? "lb-header" : ""].filter(Boolean).join(" ");
+      let html = `<div class="${podCls}" data-pod-id="${pod.id}">`;
+      html += `<div class="${headerCls}">${pod.label}</div>`;
+      for (const team of pod.teams) {
+        html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop);
+      }
+      html += `</div>`;
+      return html;
+    }
+
+    // ─── Render full bracket ──────────────────────────────────────────────────
+    function renderBracket(pods, mode, size) {
+      const phases = groupPodsByPhase(pods, mode, size);
+      const isDE = mode === "double";
+
+      if (!isDE) {
+        // Single Elimination: left-to-right
+        let html = `<div class="bracket-container"><div class="bracket-inner">`;
+        phases.forEach((ph, i) => {
+          if (i > 0) html += `<div class="connector-spacer"></div>`;
+          html += `<div class="bracket-phase">`;
+          html += `<div class="phase-label">${ph.label}</div>`;
+          html += `<div class="pods-column">`;
+          for (const pod of ph.pods) {
+            html += renderPod(pod, pod.phase === "gf", false, false);
+          }
+          html += `</div></div>`;
+        });
+        html += `</div></div>`;
+        return html;
+      }
+
+      // Double Elimination
+      const wbPhases = phases.filter(ph => ph.bracket === "wb");
+      const lbPhases = phases.filter(ph => ph.bracket === "lb");
+      const gfPhases = phases.filter(ph => ph.bracket === "gf");
+
+      let html = `<div class="bracket-container"><div class="de-bracket-wrapper">`;
+
+      // WB row
+      html += `<div class="de-row wb-row">`;
+      html += `<div class="de-row-label wb-row-label">WINNERS BRACKET</div>`;
+      html += `<div class="de-row-phases">`;
+      wbPhases.forEach((ph, i) => {
+        if (i > 0) html += `<div class="connector-spacer"></div>`;
+        html += `<div class="bracket-phase">`;
+        html += `<div class="phase-label">${ph.label}</div>`;
+        html += `<div class="pods-column">`;
+        for (const pod of ph.pods) html += renderPod(pod, false, true, false);
+        html += `</div></div>`;
+      });
+      html += `</div></div>`;
+
+      // Divider
+      html += `<div class="de-zone-divider"></div>`;
+
+      // LB row
+      html += `<div class="de-row lb-row">`;
+      html += `<div class="de-row-label lb-row-label">LOSERS BRACKET</div>`;
+      html += `<div class="de-row-phases">`;
+      lbPhases.forEach((ph, i) => {
+        if (i > 0) html += `<div class="connector-spacer"></div>`;
+        html += `<div class="bracket-phase">`;
+        html += `<div class="phase-label lb-phase-label">${ph.label}</div>`;
+        html += `<div class="pods-column">`;
+        for (const pod of ph.pods) html += renderPod(pod, false, true, true);
+        html += `</div></div>`;
+      });
+      html += `</div></div>`;
+
+      // GF column
+      if (gfPhases.length > 0) {
+        html += `<div class="de-gf-column">`;
+        for (const ph of gfPhases) {
+          html += `<div class="phase-label gf-phase-label" style="padding-bottom:12px">${ph.label}</div>`;
+          html += `<div style="display:flex;flex-direction:column;gap:8px;align-items:center">`;
+          for (const pod of ph.pods) html += renderPod(pod, pod.phase === "gf", true, false);
+          html += `</div>`;
+        }
+        html += `</div>`;
+      }
+
+      html += `</div></div>`;
+      return html;
+    }
+
+    // ─── Fetch and render ─────────────────────────────────────────────────────
+    async function fetchBracket() {
+      try {
+        const res = await fetch(`${WORKER_URL}/bracket`);
+        if (!res.ok) {
+          showWaiting();
+          return;
+        }
+        const json = await res.json();
+        if (!json.ok || !json.state) { showWaiting(); return; }
+
+        const data = JSON.parse(json.state);
+        const { pods, tournamentMode, tournamentSize } = data;
+
+        document.getElementById("main").innerHTML =
+          renderBracket(pods, tournamentMode || "single", tournamentSize || 16);
+
+        document.getElementById("liveBadge").style.display = "inline-flex";
+        lastUpdated = new Date();
+        updateTimestamp();
+      } catch (e) {
+        document.getElementById("statusText").textContent = "⚠ Could not reach server. Retrying…";
+      }
+    }
+
+    function showWaiting() {
+      document.getElementById("liveBadge").style.display = "none";
+      document.getElementById("main").innerHTML = `
+        <div class="waiting-screen">
+          <span class="icon">⏳</span>
+          <span>Tournament hasn't started yet. Check back soon.</span>
+        </div>`;
+      document.getElementById("statusText").textContent = "No active bracket — polling every 10s";
+    }
+
+    function updateTimestamp() {
+      if (!lastUpdated) return;
+      const secs = Math.round((Date.now() - lastUpdated.getTime()) / 1000);
+      document.getElementById("statusText").textContent =
+        `Last updated: ${secs === 0 ? "just now" : secs + "s ago"} · auto-refreshes every 10s`;
+    }
+
+    // ─── Start ────────────────────────────────────────────────────────────────
+    fetchBracket();
+    setInterval(fetchBracket, POLL_INTERVAL);
+    setInterval(updateTimestamp, 5000);
+  </script>
+</body>
+</html>
