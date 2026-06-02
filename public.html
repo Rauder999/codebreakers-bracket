@@ -236,6 +236,28 @@
     .gf-header { color: var(--cb-gold); border-bottom-color: rgba(245,158,11,0.3); }
     .lb-header { color: var(--cb-orange); border-bottom-color: rgba(249,115,22,0.2); }
 
+    /* ─── Map Plate ─── */
+    .map-plate {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      background: rgba(155,109,255,0.07);
+      border-bottom: 1px solid rgba(155,109,255,0.2);
+      min-height: 22px;
+    }
+    .map-name {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #9b6dff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 160px;
+    }
+
     /* ─── Team Row ─── */
     .team-row {
       display: flex;
@@ -269,7 +291,6 @@
     .team-seed { font-size: 11px; color: #666677; letter-spacing: 0.02em; }
     .team-emoji { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
     .team-name { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .team-name.has-roster { overflow: visible; }
     .team-name.empty { color: var(--cb-muted); font-weight: 400; }
     .placement-badge {
       font-size: 10px;
@@ -294,6 +315,7 @@
       cursor: default;
       text-decoration: underline dotted rgba(167,139,250,0.45);
       text-underline-offset: 3px;
+      overflow: visible;
     }
     .team-row:hover .team-name.has-roster { color: #c4b5fd !important; }
     .roster-tooltip {
@@ -356,58 +378,93 @@
     const PLACEMENT_EMOJIS = { 0: "", 1: "🥇", 2: "🥈", 3: "🥉", 4: "" };
 
     let lastUpdated = null;
-    let pollTimer = null;
 
-    // ─── Phase ordering ───────────────────────────────────────────────────────
-    function getPhaseOrder(mode, size) {
+    // ─── Phase graph (mirrors bracketEngine.ts) ───────────────────────────────
+    function getPhaseGraph(size, mode) {
       if (mode === "single") {
-        if (size === 8)  return ["groups", "final", "gf"];
-        if (size === 16) return ["groups", "semis", "final", "gf"];
-        return ["groups", "quarters", "semis", "final", "gf"];
+        if (size === 8) return [
+          { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 8, advanceTo: "final" },
+          { id: "final", label: "CASH-OUT FINAL", bracket: "wb", inputCount: 4, advanceTo: "gf" },
+          { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+        ];
+        if (size === 16) return [
+          { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 16, advanceTo: "semis" },
+          { id: "semis", label: "SEMIFINALS", bracket: "wb", inputCount: 8, advanceTo: "final" },
+          { id: "final", label: "CASH-OUT FINAL", bracket: "wb", inputCount: 4, advanceTo: "gf" },
+          { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+        ];
+        return [
+          { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 32, advanceTo: "quarters" },
+          { id: "quarters", label: "QUARTERFINALS", bracket: "wb", inputCount: 16, advanceTo: "semis" },
+          { id: "semis", label: "SEMIFINALS", bracket: "wb", inputCount: 8, advanceTo: "final" },
+          { id: "final", label: "CASH-OUT FINAL", bracket: "wb", inputCount: 4, advanceTo: "gf" },
+          { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+        ];
       }
       // double
-      if (size === 8)  return ["groups", "wb-final", "lb-r1", "lb-r2", "lb-final", "gf"];
-      if (size === 16) return ["groups", "wb-semis", "wb-final", "lb-r1", "lb-r2", "lb-semi", "lb-final", "lb-winners-final", "gf"];
-      return ["groups", "wb-r2", "wb-semis", "wb-final", "lb-r1", "lb-r2", "lb-r3", "lb-r4", "lb-semi", "lb-final", "lb-winners-final", "gf"];
+      if (size === 8) return [
+        { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 8, advanceTo: "wb-final", dropTo: "lb-r1" },
+        { id: "wb-final", label: "WB FINAL", bracket: "wb", inputCount: 4, advanceTo: "cashout", hasNoLBDrop: true },
+        { id: "lb-r1", label: "LB ROUND 1", bracket: "lb", inputCount: 4, advanceTo: "cashout" },
+        { id: "cashout", label: "CASH-OUT FINAL", bracket: "gf", inputCount: 4, advanceTo: "gf", hasNoLBDrop: true },
+        { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+      ];
+      if (size === 16) return [
+        { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 16, advanceTo: "wb-semis", dropTo: "lb-r1" },
+        { id: "wb-semis", label: "WB SEMIFINALS", bracket: "wb", inputCount: 8, advanceTo: "wb-final", dropTo: "lb-r2" },
+        { id: "wb-final", label: "WB FINAL", bracket: "wb", inputCount: 4, advanceTo: "cashout", hasNoLBDrop: true },
+        { id: "lb-r1", label: "LB ROUND 1", bracket: "lb", inputCount: 8, advanceTo: "lb-r2" },
+        { id: "lb-r2", label: "LB ROUND 2", bracket: "lb", inputCount: 8, advanceTo: "lb-final" },
+        { id: "lb-final", label: "LB FINAL", bracket: "lb", inputCount: 4, advanceTo: "cashout" },
+        { id: "cashout", label: "CASH-OUT FINAL", bracket: "gf", inputCount: 4, advanceTo: "gf", hasNoLBDrop: true },
+        { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+      ];
+      return [
+        { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 32, advanceTo: "wb-r2", dropTo: "lb-r1" },
+        { id: "wb-r2", label: "WB QUARTERS", bracket: "wb", inputCount: 16, advanceTo: "wb-semis", dropTo: "lb-r2" },
+        { id: "wb-semis", label: "WB SEMIFINALS", bracket: "wb", inputCount: 8, advanceTo: "wb-final", dropTo: "lb-r4" },
+        { id: "wb-final", label: "WB FINAL", bracket: "wb", inputCount: 4, advanceTo: "cashout", dropTo: "lb-final" },
+        { id: "lb-r1", label: "LB ROUND 1", bracket: "lb", inputCount: 16, advanceTo: "lb-r2" },
+        { id: "lb-r2", label: "LB ROUND 2", bracket: "lb", inputCount: 16, advanceTo: "lb-r3" },
+        { id: "lb-r3", label: "LB ROUND 3", bracket: "lb", inputCount: 8, advanceTo: "lb-r4" },
+        { id: "lb-r4", label: "LB ROUND 4", bracket: "lb", inputCount: 8, advanceTo: "lb-semi" },
+        { id: "lb-semi", label: "LB SEMIFINAL", bracket: "lb", inputCount: 4, advanceTo: "lb-final" },
+        { id: "lb-final", label: "LB FINAL", bracket: "lb", inputCount: 4, advanceTo: "cashout" },
+        { id: "cashout", label: "CASH-OUT FINAL", bracket: "gf", inputCount: 4, advanceTo: "gf", hasNoLBDrop: true },
+        { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+      ];
     }
-
-    const PHASE_LABELS = {
-      groups: "GROUP STAGE", quarters: "QUARTERFINALS", semis: "SEMIFINALS",
-      final: "CASH-OUT FINAL", cashout: "CASH-OUT FINAL", gf: "GRAND FINAL",
-      "wb-r2": "WB QUARTERS", "wb-semis": "WB SEMIFINALS", "wb-final": "WB FINAL",
-      "lb-r1": "LB ROUND 1", "lb-r2": "LB ROUND 2", "lb-r3": "LB ROUND 3",
-      "lb-r4": "LB ROUND 4", "lb-semi": "LB SEMIFINAL", "lb-final": "LB FINAL",
-      "lb-winners-final": "LB WINNERS FINAL",
-    };
 
     // ─── Group pods by phase ──────────────────────────────────────────────────
     function groupPodsByPhase(pods, mode, size) {
-      const order = getPhaseOrder(mode, size);
+      const graph = getPhaseGraph(size, mode);
+      const labelMap = new Map(graph.map(p => [p.id, p.label]));
       const map = new Map();
       for (const p of pods) {
         if (!map.has(p.phase)) map.set(p.phase, []);
         map.get(p.phase).push(p);
       }
-      return order
-        .filter(ph => map.has(ph))
+      return graph
+        .filter(ph => map.has(ph.id))
         .map(ph => ({
-          phase: ph,
-          label: PHASE_LABELS[ph] || ph.toUpperCase(),
-          pods: map.get(ph),
-          bracket: map.get(ph)[0]?.bracket,
+          phase: ph.id,
+          label: labelMap.get(ph.id) || ph.id.toUpperCase(),
+          pods: map.get(ph.id),
+          bracket: map.get(ph.id)[0]?.bracket,
         }));
     }
 
     // ─── Render a single team row ─────────────────────────────────────────────
-    function renderTeamRow(team, isGF, isDE, isLB, hasNoLBDrop) {
+    function renderTeamRow(team, isGF, isDE, isLB, hasNoLBDrop, podSize) {
       const placement = team.placement || 0;
+      const advanceCount = podSize / 2;
       const isChampion = isGF && placement === 1 && team.name;
-      const isAdvancing = !isGF && (placement === 1 || placement === 2);
-      const isDropping  = isDE && !isLB && !isGF && !hasNoLBDrop && (placement === 3 || placement === 4);
+      const isAdvancing = !isGF && placement >= 1 && placement <= advanceCount;
+      const isDropping  = isDE && !isLB && !isGF && !hasNoLBDrop && placement > advanceCount && placement <= podSize;
       const isEliminated = !isGF && (
-        (isLB && (placement === 3 || placement === 4)) ||
-        (!isDE && (placement === 3 || placement === 4)) ||
-        (isDE && hasNoLBDrop && (placement === 3 || placement === 4))
+        (isLB && placement > advanceCount) ||
+        (!isDE && placement > advanceCount) ||
+        (isDE && hasNoLBDrop && placement > advanceCount)
       );
       const isEmpty = !team.name;
 
@@ -442,7 +499,7 @@
         nameHtml += (team.name || '— TBD —');
         if (hasRoster) {
           nameHtml += '<span class="roster-tooltip"><span class="roster-tooltip-title">' + team.name + '</span>';
-          for (const p of team.players) { nameHtml += '<span class="roster-tooltip-player">▸ ' + p + '</span>'; }
+          for (const p of team.players) { nameHtml += '<span class="roster-tooltip-player">&#9658; ' + p + '</span>'; }
           nameHtml += '</span>';
         }
         nameHtml += '</span>';
@@ -459,10 +516,15 @@
     function renderPod(pod, isGF, isDE, isLB) {
       const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : ""].filter(Boolean).join(" ");
       const headerCls = ["pod-header", isGF ? "gf-header" : "", isLB ? "lb-header" : ""].filter(Boolean).join(" ");
+      const podSize = pod.teams.length;
       let html = `<div class="${podCls}" data-pod-id="${pod.id}">`;
       html += `<div class="${headerCls}">${pod.label}</div>`;
+      // Map plate
+      if (pod.map) {
+        html += `<div class="map-plate"><span class="map-name">${pod.map}</span></div>`;
+      }
       for (const team of pod.teams) {
-        html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop);
+        html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop, podSize);
       }
       html += `</div>`;
       return html;
@@ -474,7 +536,6 @@
       const isDE = mode === "double";
 
       if (!isDE) {
-        // Single Elimination: left-to-right
         let html = `<div class="bracket-container"><div class="bracket-inner">`;
         phases.forEach((ph, i) => {
           if (i > 0) html += `<div class="connector-spacer"></div>`;
@@ -548,10 +609,7 @@
     async function fetchBracket() {
       try {
         const res = await fetch(`${WORKER_URL}/bracket`);
-        if (!res.ok) {
-          showWaiting();
-          return;
-        }
+        if (!res.ok) { showWaiting(); return; }
         const json = await res.json();
         if (!json.ok || !json.state) { showWaiting(); return; }
 
