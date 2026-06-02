@@ -546,31 +546,30 @@
         `Updated ${secs === 0 ? "just now" : secs + "s ago"} · auto-refreshes every 5s`;
     }
 
-    // ─── Phase graph ─────────────────────────────────────────────────────────
+    // ─── Phase graph (MUST match bracketEngine.ts exactly) ────────────────────
     function getPhaseGraph(size, mode) {
       if (mode !== "double") {
         if (size === 8)  return [
-          { id:"r1",label:"ROUND 1",bracket:"wb",advanceTo:"r2" },
-          { id:"r2",label:"SEMIFINALS",bracket:"wb",advanceTo:"gf" },
+          { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"final" },
+          { id:"final",label:"CASH-OUT FINAL",bracket:"wb",advanceTo:"gf" },
           { id:"gf",label:"GRAND FINAL",bracket:"gf" },
         ];
         if (size === 16) return [
-          { id:"r1",label:"ROUND 1",bracket:"wb",advanceTo:"r2" },
-          { id:"r2",label:"ROUND 2",bracket:"wb",advanceTo:"r3" },
-          { id:"r3",label:"SEMIFINALS",bracket:"wb",advanceTo:"gf" },
+          { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"semis" },
+          { id:"semis",label:"SEMIFINALS",bracket:"wb",advanceTo:"final" },
+          { id:"final",label:"CASH-OUT FINAL",bracket:"wb",advanceTo:"gf" },
           { id:"gf",label:"GRAND FINAL",bracket:"gf" },
         ];
         return [
-          { id:"r1",label:"ROUND 1",bracket:"wb" },
-          { id:"r2",label:"ROUND 2",bracket:"wb" },
-          { id:"r3",label:"ROUND 3",bracket:"wb" },
-          { id:"r4",label:"QUARTERFINALS",bracket:"wb" },
-          { id:"r5",label:"SEMIFINALS",bracket:"wb",advanceTo:"gf" },
+          { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"quarters" },
+          { id:"quarters",label:"QUARTERFINALS",bracket:"wb",advanceTo:"semis" },
+          { id:"semis",label:"SEMIFINALS",bracket:"wb",advanceTo:"final" },
+          { id:"final",label:"CASH-OUT FINAL",bracket:"wb",advanceTo:"gf" },
           { id:"gf",label:"GRAND FINAL",bracket:"gf" },
         ];
       }
       if (size === 8) return [
-        { id:"wb-r1",label:"WB ROUND 1",bracket:"wb",advanceTo:"wb-final",dropTo:"lb-r1" },
+        { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"wb-final",dropTo:"lb-r1" },
         { id:"wb-final",label:"WB FINAL",bracket:"wb",advanceTo:"cashout",dropTo:"lb-final" },
         { id:"lb-r1",label:"LB ROUND 1",bracket:"lb",advanceTo:"lb-final" },
         { id:"lb-final",label:"LB FINAL",bracket:"lb",advanceTo:"cashout" },
@@ -578,8 +577,8 @@
         { id:"gf",label:"GRAND FINAL",bracket:"gf" },
       ];
       if (size === 16) return [
-        { id:"wb-r1",label:"WB ROUND 1",bracket:"wb",advanceTo:"wb-r2",dropTo:"lb-r1" },
-        { id:"wb-r2",label:"WB ROUND 2",bracket:"wb",advanceTo:"wb-final",dropTo:"lb-r2" },
+        { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"wb-semis",dropTo:"lb-r1" },
+        { id:"wb-semis",label:"WB SEMIFINALS",bracket:"wb",advanceTo:"wb-final",dropTo:"lb-r2" },
         { id:"wb-final",label:"WB FINAL",bracket:"wb",advanceTo:"cashout",dropTo:"lb-final" },
         { id:"lb-r1",label:"LB ROUND 1",bracket:"lb",advanceTo:"lb-r2" },
         { id:"lb-r2",label:"LB ROUND 2",bracket:"lb",advanceTo:"lb-semi" },
@@ -589,9 +588,9 @@
         { id:"gf",label:"GRAND FINAL",bracket:"gf" },
       ];
       return [
-        { id:"wb-r1",label:"WB ROUND 1",bracket:"wb",advanceTo:"wb-r2",dropTo:"lb-r1" },
-        { id:"wb-r2",label:"WB ROUND 2",bracket:"wb",advanceTo:"wb-r3",dropTo:"lb-r2" },
-        { id:"wb-r3",label:"WB ROUND 3",bracket:"wb",advanceTo:"wb-final",dropTo:"lb-r3" },
+        { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"wb-r2",dropTo:"lb-r1" },
+        { id:"wb-r2",label:"WB QUARTERS",bracket:"wb",advanceTo:"wb-semis",dropTo:"lb-r2" },
+        { id:"wb-semis",label:"WB SEMIFINALS",bracket:"wb",advanceTo:"wb-final",dropTo:"lb-r4" },
         { id:"wb-final",label:"WB FINAL",bracket:"wb",advanceTo:"cashout",dropTo:"lb-final" },
         { id:"lb-r1",label:"LB ROUND 1",bracket:"lb",advanceTo:"lb-r2" },
         { id:"lb-r2",label:"LB ROUND 2",bracket:"lb",advanceTo:"lb-r3" },
