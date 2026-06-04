@@ -507,7 +507,7 @@
         const json = await res.json();
         if (!json.ok || !json.state) { showWaiting("No bracket data yet."); return; }
         const data = JSON.parse(json.state);
-        const { pods, tournamentMode, tournamentSize, tournamentName } = data;
+        const { pods, tournamentMode, tournamentSize, tournamentName, finalsBracket } = data;
         // Show tournament name
         const nameEl = document.getElementById("tournamentNameEl");
         if (tournamentName) {
@@ -520,7 +520,7 @@
         }
         document.getElementById("headerSubtitle").textContent = currentSession;
         document.getElementById("main").innerHTML =
-          renderBracket(pods, tournamentMode || "single", tournamentSize || 16);
+          renderBracket(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket });
         document.getElementById("liveBadge").style.display = "inline-flex";
         lastUpdated = new Date();
         updateTimestamp();
@@ -603,8 +603,23 @@
       ];
     }
 
-    function groupPodsByPhase(pods, mode, size) {
-      const graph = getPhaseGraph(size, mode);
+    // Insert the head-to-head finals round before GF when enabled (matches engine).
+    function applyFinalsBracket(graph, opts) {
+      if (!opts || !opts.finalsBracket) return graph;
+      const finalId = graph.find(p => p.id === "cashout") ? "cashout" : "final";
+      const out = [];
+      for (const p of graph) {
+        if (p.id === finalId) out.push({ ...p, advanceTo: "fbracket" });
+        else if (p.id === "gf") {
+          out.push({ id:"fbracket", label:"FINALS", bracket:"gf", advanceTo:"gf" });
+          out.push(p);
+        } else out.push(p);
+      }
+      return out;
+    }
+
+    function groupPodsByPhase(pods, mode, size, opts) {
+      const graph = applyFinalsBracket(getPhaseGraph(size, mode), opts);
       const labelMap = new Map(graph.map(p => [p.id, p.label]));
       const map = new Map();
       for (const p of pods) {
@@ -680,8 +695,8 @@
     }
 
     // ─── Bracket renderer ─────────────────────────────────────────────────────
-    function renderBracket(pods, mode, size) {
-      const phases = groupPodsByPhase(pods, mode, size);
+    function renderBracket(pods, mode, size, opts) {
+      const phases = groupPodsByPhase(pods, mode, size, opts);
       const isDE = mode === "double";
       if (!isDE) {
         let html = `<div class="bracket-container"><div class="bracket-inner">`;
