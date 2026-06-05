@@ -245,7 +245,7 @@
     }
     .de-bracket-wrapper {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: max-content auto;
       grid-template-rows: auto auto auto;
       gap: 0;
       min-width: max-content;
@@ -349,6 +349,36 @@
     .path-badge { font-size: 9px; font-weight: 800; letter-spacing: 0.12em; flex-shrink: 0; padding: 1px 4px; }
     .wb-badge { background: rgba(155,109,255,0.15); color: var(--cb-purple); }
     .lb-badge { background: rgba(249,115,22,0.15); color: var(--cb-orange); }
+    /* ─── Streaming treatment ─── */
+    .match-pod.streaming {
+      box-shadow: 0 0 0 1px #ef4444, 0 0 12px rgba(239,68,68,0.25);
+    }
+    .match-pod.streaming .pod-header {
+      background: rgba(239,68,68,0.12);
+      color: #fca5a5;
+    }
+    .stream-live-badge {
+      font-size: 9px; font-weight: 800; letter-spacing: 0.1em;
+      color: #ef4444; padding: 0 10px 4px;
+    }
+    /* ─── Fit mode ─── */
+    .bracket-container.fit-mode {
+      overflow: visible;
+      transform-origin: top left;
+    }
+    .fit-btn {
+      background: transparent;
+      border: 1px solid var(--cb-border);
+      color: var(--cb-silver);
+      font-family: 'Saira Condensed', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      padding: 4px 12px;
+      cursor: pointer;
+      transition: border-color 150ms, color 150ms;
+    }
+    .fit-btn:hover { border-color: var(--cb-silver); color: var(--cb-text); }
+    .fit-btn.active { border-color: var(--cb-purple); color: var(--cb-purple); }
   </style>
 </head>
 <body>
@@ -367,7 +397,10 @@
       <button class="back-btn" onclick="showGallery()">Back to Gallery</button>
       <span id="statusText" style="font-size:11px;color:var(--cb-muted)"></span>
     </div>
-    <button class="refresh-btn" onclick="fetchSession()">Refresh</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="fit-btn" id="fitBtn" onclick="toggleFit()">Fit</button>
+      <button class="refresh-btn" onclick="fetchSession()">Refresh</button>
+    </div>
   </div>
 
   <!-- ─── Gallery view ─── -->
@@ -398,6 +431,7 @@
     let lastUpdated = null;
     let pollTimer = null;
     let galleryTimer = null;
+    let _fitActive = false;
 
     // ─── Routing ─────────────────────────────────────────────────────────────
     function getSessionParam() {
@@ -427,6 +461,10 @@
       document.getElementById("headerSubtitle").textContent = "LIVE TOURNAMENTS";
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       currentSession = null;
+      // Reset fit state
+      if (_fitActive) { _fitActive = false; clearFit(); }
+      const fitBtn = document.getElementById("fitBtn");
+      if (fitBtn) { fitBtn.classList.remove("active"); fitBtn.textContent = "Fit"; }
       // Update URL
       history.pushState({}, "", window.location.pathname);
     }
@@ -685,11 +723,12 @@
 
     // ─── Pod renderer ─────────────────────────────────────────────────────────
     function renderPod(pod, isGF, isDE, isLB) {
-      const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : ""].filter(Boolean).join(" ");
+      const isStreaming = !!pod.streaming;
+      const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : "", isStreaming ? "streaming" : ""].filter(Boolean).join(" ");
       const headerCls = ["pod-header", isGF ? "gf-header" : "", isLB ? "lb-header" : ""].filter(Boolean).join(" ");
       const podSize = pod.teams.length;
       let html = `<div class="${podCls}" data-pod-id="${pod.id}">`;
-      html += `<div class="${headerCls}">${pod.label}</div>`;
+      html += `<div class="${headerCls}">${pod.label}${isStreaming ? ` <span class="stream-live-badge">&#128247; LIVE</span>` : ""}</div>`;
       if (pod.map) html += `<div class="map-plate"><span class="map-name">${escHtml(pod.map)}</span></div>`;
       for (const team of pod.teams) html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop, podSize);
       html += `</div>`;
@@ -864,9 +903,15 @@
       }
       for (const group of bySource.values()) {
         group.forEach((ln, gi) => {
-          const gap = ln.x2 - ln.x1;
-          const base = ln.x1 + Math.max(24, gap * 0.4);
-          ln.channelX = base + gi * 7;
+          if (ln.isDrop) {
+            // Drop lines exit immediately into the right gutter of the source pod
+            // to avoid routing through team-name rows horizontally
+            ln.channelX = ln.x1 + 16 + gi * 7;
+          } else {
+            const gap = ln.x2 - ln.x1;
+            const base = ln.x1 + Math.max(24, gap * 0.4);
+            ln.channelX = base + gi * 7;
+          }
         });
       }
       // Build SVG
@@ -902,7 +947,48 @@
         const { pods, mode, size, opts } = _lastConnectorArgs;
         measureConnectors(pods, mode, size, opts);
       }
+      if (_fitActive) applyFit();
     });
+
+    // ─── Fit button ───────────────────────────────────────────────────────────
+    function applyFit() {
+      const container = document.querySelector(".bracket-container");
+      if (!container) return;
+      const viewW = window.innerWidth;
+      const viewH = window.innerHeight - (document.getElementById("statusBar").offsetHeight || 0) - (document.querySelector(".cb-header").offsetHeight || 0);
+      const naturalW = container.scrollWidth;
+      const naturalH = container.scrollHeight;
+      const scaleW = viewW / naturalW;
+      const scaleH = viewH / naturalH;
+      const scale = Math.min(scaleW, scaleH, 1);
+      container.style.transform = `scale(${scale})`;
+      container.style.transformOrigin = "top left";
+      container.style.overflow = "visible";
+      container.style.width = (naturalW * scale) + "px";
+      container.style.height = (naturalH * scale) + "px";
+    }
+    function clearFit() {
+      const container = document.querySelector(".bracket-container");
+      if (!container) return;
+      container.style.transform = "";
+      container.style.transformOrigin = "";
+      container.style.overflow = "";
+      container.style.width = "";
+      container.style.height = "";
+    }
+    function toggleFit() {
+      _fitActive = !_fitActive;
+      const btn = document.getElementById("fitBtn");
+      if (_fitActive) {
+        btn.classList.add("active");
+        btn.textContent = "Unfit";
+        applyFit();
+      } else {
+        btn.classList.remove("active");
+        btn.textContent = "Fit";
+        clearFit();
+      }
+    }
 
     // ─── Timestamp updater ────────────────────────────────────────────────────
     setInterval(updateTimestamp, 5000);
