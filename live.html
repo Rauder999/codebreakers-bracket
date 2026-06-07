@@ -235,6 +235,7 @@
     .bracket-container {
       overflow-x: auto;
       padding: 20px 16px 40px;
+      position: relative;
     }
     .bracket-inner {
       display: inline-flex;
@@ -276,7 +277,7 @@
     .lb-phase-label { color: var(--cb-orange); }
     .gf-phase-label { color: var(--cb-gold); }
     .pods-column { display: flex; flex-direction: column; gap: 8px; }
-    .connector-spacer { width: 32px; flex-shrink: 0; }
+    .connector-spacer { width: 20px; flex-shrink: 0; }
     /* ─── Pods ─── */
     .match-pod {
       background: var(--cb-panel);
@@ -350,10 +351,17 @@
     .wb-badge { background: rgba(155,109,255,0.15); color: var(--cb-purple); }
     .lb-badge { background: rgba(249,115,22,0.15); color: var(--cb-orange); }
     /* ─── Streaming treatment ─── */
-    .match-pod.streaming {
+    .match-pod.on-stream {
+      box-shadow: 0 0 0 1px rgba(34,211,238,0.5);
+    }
+    .match-pod.on-stream .pod-header {
+      background: rgba(34,211,238,0.08);
+      color: #67e8f9;
+    }
+    .match-pod.live-now {
       box-shadow: 0 0 0 1px #ef4444, 0 0 12px rgba(239,68,68,0.25);
     }
-    .match-pod.streaming .pod-header {
+    .match-pod.live-now .pod-header {
       background: rgba(239,68,68,0.12);
       color: #fca5a5;
     }
@@ -361,12 +369,16 @@
       font-size: 9px; font-weight: 800; letter-spacing: 0.1em;
       color: #ef4444; padding: 0 10px 4px;
     }
-    /* ─── Fit mode ─── */
-    .bracket-container.fit-mode {
-      overflow: visible;
-      transform-origin: top left;
-    }
-    .fit-btn {
+    /* ─── Compact mode ─── */
+    body.compact .team-row { padding: 3px 10px; min-height: 0; font-size: 11px; }
+    body.compact .team-name { font-size: 11px; }
+    body.compact .team-emoji { font-size: 10px; }
+    body.compact .pods-column { gap: 4px; }
+    body.compact .pod-header { padding: 3px 10px; font-size: 8px; }
+    body.compact .map-plate { padding: 2px 10px; }
+    body.compact .match-pod { min-width: 160px; }
+    /* Compact toggle button */
+    .compact-btn {
       background: transparent;
       border: 1px solid var(--cb-border);
       color: var(--cb-silver);
@@ -377,8 +389,8 @@
       cursor: pointer;
       transition: border-color 150ms, color 150ms;
     }
-    .fit-btn:hover { border-color: var(--cb-silver); color: var(--cb-text); }
-    .fit-btn.active { border-color: var(--cb-purple); color: var(--cb-purple); }
+    .compact-btn:hover { border-color: var(--cb-silver); color: var(--cb-text); }
+    .compact-btn.active { border-color: var(--cb-purple); color: var(--cb-purple); }
   </style>
 </head>
 <body>
@@ -398,7 +410,7 @@
       <span id="statusText" style="font-size:11px;color:var(--cb-muted)"></span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="fit-btn" id="fitBtn" onclick="toggleFit()">Fit</button>
+      <button class="compact-btn" id="compactBtn" onclick="toggleCompact()">Compact</button>
       <button class="refresh-btn" onclick="fetchSession()">Refresh</button>
     </div>
   </div>
@@ -431,7 +443,7 @@
     let lastUpdated = null;
     let pollTimer = null;
     let galleryTimer = null;
-    let _fitActive = false;
+    let _compactActive = false;
 
     // ─── Routing ─────────────────────────────────────────────────────────────
     function getSessionParam() {
@@ -461,10 +473,12 @@
       document.getElementById("headerSubtitle").textContent = "LIVE TOURNAMENTS";
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       currentSession = null;
-      // Reset fit state
-      if (_fitActive) { _fitActive = false; clearFit(); }
-      const fitBtn = document.getElementById("fitBtn");
-      if (fitBtn) { fitBtn.classList.remove("active"); fitBtn.textContent = "Fit"; }
+      // Reset compact state
+      if (document.body.classList.contains("compact")) {
+        document.body.classList.remove("compact");
+        const cb = document.getElementById("compactBtn");
+        if (cb) { cb.classList.remove("active"); cb.textContent = "Compact"; }
+      }
       // Update URL
       history.pushState({}, "", window.location.pathname);
     }
@@ -723,12 +737,16 @@
 
     // ─── Pod renderer ─────────────────────────────────────────────────────────
     function renderPod(pod, isGF, isDE, isLB) {
-      const isStreaming = !!pod.streaming;
-      const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : "", isStreaming ? "streaming" : ""].filter(Boolean).join(" ");
+      const isLiveNow = !!pod.liveNow;
+      const isOnStream = !!pod.onStream && !pod.liveNow;
+      const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : "", isLiveNow ? "live-now" : "", isOnStream ? "on-stream" : ""].filter(Boolean).join(" ");
       const headerCls = ["pod-header", isGF ? "gf-header" : "", isLB ? "lb-header" : ""].filter(Boolean).join(" ");
       const podSize = pod.teams.length;
       let html = `<div class="${podCls}" data-pod-id="${pod.id}">`;
-      html += `<div class="${headerCls}">${pod.label}${isStreaming ? ` <span class="stream-live-badge">&#128247; LIVE</span>` : ""}</div>`;
+      const streamBadge = isLiveNow
+        ? ` <span class="stream-live-badge">&#128247; LIVE</span>`
+        : isOnStream ? ` <span class="stream-live-badge" style="color:#67e8f9">&#128247;</span>` : "";
+      html += `<div class="${headerCls}">${pod.label}${streamBadge}</div>`;
       if (pod.map) html += `<div class="map-plate"><span class="map-name">${escHtml(pod.map)}</span></div>`;
       for (const team of pod.teams) html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop, podSize);
       html += `</div>`;
@@ -851,7 +869,10 @@
           }
         }
         // Drop connectors (DE WB only)
-        if (phase.dropTo && mode === "double" && !phase.hasNoLBDrop) {
+        // Drop lines are intentionally NOT rendered on the spectator view:
+        // across the compressed live layout they cross over pods (the "strikethrough"
+        // look). Spectators only need the green advance lines for readability.
+        if (false && phase.dropTo && mode === "double" && !phase.hasNoLBDrop) {
           const droppingTeams = pod.teams
             .map((t, i) => ({ t, i }))
             .filter(({ t }) => t.placement > advanceCount && t.placement <= podSize && t.name)
@@ -947,46 +968,15 @@
         const { pods, mode, size, opts } = _lastConnectorArgs;
         measureConnectors(pods, mode, size, opts);
       }
-      if (_fitActive) applyFit();
     });
-
-    // ─── Fit button ───────────────────────────────────────────────────────────
-    function applyFit() {
-      const container = document.querySelector(".bracket-container");
-      if (!container) return;
-      const viewW = window.innerWidth;
-      const viewH = window.innerHeight - (document.getElementById("statusBar").offsetHeight || 0) - (document.querySelector(".cb-header").offsetHeight || 0);
-      const naturalW = container.scrollWidth;
-      const naturalH = container.scrollHeight;
-      const scaleW = viewW / naturalW;
-      const scaleH = viewH / naturalH;
-      const scale = Math.min(scaleW, scaleH, 1);
-      container.style.transform = `scale(${scale})`;
-      container.style.transformOrigin = "top left";
-      container.style.overflow = "visible";
-      container.style.width = (naturalW * scale) + "px";
-      container.style.height = (naturalH * scale) + "px";
-    }
-    function clearFit() {
-      const container = document.querySelector(".bracket-container");
-      if (!container) return;
-      container.style.transform = "";
-      container.style.transformOrigin = "";
-      container.style.overflow = "";
-      container.style.width = "";
-      container.style.height = "";
-    }
-    function toggleFit() {
-      _fitActive = !_fitActive;
-      const btn = document.getElementById("fitBtn");
-      if (_fitActive) {
-        btn.classList.add("active");
-        btn.textContent = "Unfit";
-        applyFit();
-      } else {
-        btn.classList.remove("active");
-        btn.textContent = "Fit";
-        clearFit();
+    // ─── Compact toggle ───────────────────────────────────────────────────────
+    function toggleCompact() {
+      _compactActive = !_compactActive;
+      document.body.classList.toggle("compact", _compactActive);
+      const btn = document.getElementById("compactBtn");
+      if (btn) {
+        btn.classList.toggle("active", _compactActive);
+        btn.textContent = _compactActive ? "Normal" : "Compact";
       }
     }
 
