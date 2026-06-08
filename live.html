@@ -926,12 +926,16 @@
         group.forEach((ln, gi) => {
           if (ln.isDrop) {
             // Drop lines exit immediately into the right gutter of the source pod
-            // to avoid routing through team-name rows horizontally
             ln.channelX = ln.x1 + 16 + gi * 7;
           } else {
             const gap = ln.x2 - ln.x1;
-            const base = ln.x1 + Math.max(24, gap * 0.4);
-            ln.channelX = base + gi * 7;
+            if (gap < 40) {
+              // Stacked / same-column (finals): corridor right of both edges
+              ln.channelX = Math.max(ln.x1, ln.x2) + 28 + gi * 7;
+            } else {
+              const base = ln.x1 + Math.max(24, gap * 0.4);
+              ln.channelX = base + gi * 7;
+            }
           }
         });
       }
@@ -943,11 +947,12 @@
       for (const c of lines) {
         const color = c.isDrop ? (c.active ? "#f97316" : "#2a1808") : (c.active ? "#22c55e" : "#1e1e28");
         const sw = c.active ? 1.6 : 1;
-        const cx = Math.max(c.x1 + 8, Math.min(c.channelX, c.x2 - 8));
-        const r = Math.min(8, Math.abs(c.y2 - c.y1) / 2, Math.abs(cx - c.x1), Math.abs(c.x2 - cx));
-        const dir = c.y2 >= c.y1 ? 1 : -1;
+        const cx = Math.max(c.x1 + 8, c.channelX);
+        const dirY = c.y2 >= c.y1 ? 1 : -1;
+        const dirIn = c.x2 >= cx ? 1 : -1;
+        const r = Math.max(0, Math.min(8, Math.abs(c.y2 - c.y1) / 2, Math.abs(cx - c.x1), Math.abs(c.x2 - cx)));
         const dPath = r > 1
-          ? `M ${c.x1} ${c.y1} L ${cx-r} ${c.y1} Q ${cx} ${c.y1} ${cx} ${c.y1+dir*r} L ${cx} ${c.y2-dir*r} Q ${cx} ${c.y2} ${cx+r} ${c.y2} L ${c.x2} ${c.y2}`
+          ? `M ${c.x1} ${c.y1} L ${cx-r} ${c.y1} Q ${cx} ${c.y1} ${cx} ${c.y1+dirY*r} L ${cx} ${c.y2-dirY*r} Q ${cx} ${c.y2} ${cx+dirIn*r} ${c.y2} L ${c.x2} ${c.y2}`
           : `M ${c.x1} ${c.y1} L ${cx} ${c.y1} L ${cx} ${c.y2} L ${c.x2} ${c.y2}`;
         const path = document.createElementNS(svgNS, "path");
         path.setAttribute("d", dPath);

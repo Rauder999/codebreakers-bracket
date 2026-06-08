@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Codebreakers Stream Overlay</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;600;700;900&display=swap');
+
+  :root {
+    --bg: #1d1c22;
+    --silver: #b8b8cc;
+    --purple: #9b6dff;
+    --cyan: #22d3ee;
+    --text: #f0f0f5;
+    --muted: #6b6b7a;
+    --win: #22c55e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* Transparent background so OBS Browser Source overlays cleanly */
+  html, body {
+    background: transparent;
+    font-family: 'Saira Condensed', sans-serif;
+    color: var(--text);
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+
+  #overlay-root {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .match-card {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    background: linear-gradient(180deg, rgba(29,28,34,0.96), rgba(20,19,24,0.96));
+    border: 1px solid rgba(155,109,255,0.4);
+    border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.3);
+    overflow: hidden;
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    transition: opacity 300ms ease;
+  }
+  .match-card.visible { opacity: 1; }
+
+  /* Each team column */
+  .team-col {
+    flex: 1;
+    min-width: 220px;
+    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+  }
+  .team-col:not(:last-child) {
+    border-right: 1px solid rgba(184,184,204,0.12);
+  }
+
+  .team-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .team-seed {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--purple);
+    letter-spacing: 0.05em;
+    min-width: 28px;
+  }
+  .team-name {
+    font-size: 26px;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .roster {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 2px;
+  }
+  .player {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--silver);
+    letter-spacing: 0.03em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .player::before {
+    content: "";
+    width: 4px; height: 4px;
+    background: var(--cyan);
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Header strip: tournament name + match label */
+  .match-header {
+    position: absolute;
+    top: -34px;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+  .match-label {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+  .match-map {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+    animation: pulse 1.4s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  /* 4-team layout: 2x2 grid feel via wrapping */
+  .match-card.teams-4 { max-width: 1100px; }
+  .match-card.teams-2 { max-width: 720px; }
+
+  #waiting {
+    color: var(--muted);
+    font-size: 16px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+<div id="overlay-root">
+  <div id="waiting">Waiting for a live match...</div>
+</div>
+
+<script>
+  const WORKER_URL = "https://operator-api.taksatovq.workers.dev";
+  const POLL_MS = 2500;
+
+  const params = new URLSearchParams(window.location.search);
+  const sessionCode = (params.get("session") || "").toUpperCase();
+  // Optional: hide players with ?players=0
+  const showPlayers = params.get("players") !== "0";
+
+  const root = document.getElementById("overlay-root");
+
+  function escHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  let lastSignature = "";
+
+  function renderMatch(pod, tournamentName) {
+    if (!pod) {
+      // nothing live: show waiting, keep it subtle
+      if (lastSignature !== "WAITING") {
+        root.innerHTML = '<div id="waiting">Waiting for a live match...</div>';
+        lastSignature = "WAITING";
+      }
+      return;
+    }
+
+    const teams = (pod.teams || []).filter(t => t && t.name);
+    const count = teams.length;
+    const signature = JSON.stringify({ id: pod.id, map: pod.map, teams: teams.map(t => [t.name, t.seed, (t.players||[]).join(",")]) });
+    if (signature === lastSignature) return; // no change, skip re-render (avoids flicker)
+    lastSignature = signature;
+
+    const teamCols = teams.map(t => {
+      const seed = t.seed ? `#${t.seed}` : "";
+      const players = showPlayers && Array.isArray(t.players) && t.players.length
+        ? `<div class="roster">${t.players.map(p => `<span class="player">${escHtml(p)}</span>`).join("")}</div>`
+        : "";
+      return `
+        <div class="team-col">
+          <div class="team-head">
+            <span class="team-seed">${escHtml(seed)}</span>
+            <span class="team-name">${escHtml(t.name)}</span>
+          </div>
+          ${players}
+        </div>`;
+    }).join("");
+
+    const mapLabel = pod.map ? `<span class="match-map">${escHtml(pod.map)}</span>` : "";
+    const header = `
+      <div class="match-header">
+        <span class="live-dot"></span>
+        <span class="match-label">${escHtml(pod.label || "LIVE MATCH")}</span>
+        ${mapLabel}
+      </div>`;
+
+    root.innerHTML = `
+      <div class="match-card teams-${count >= 3 ? 4 : 2}" style="margin-top: 34px;">
+        ${header}
+        ${teamCols}
+      </div>`;
+    // fade in
+    const card = root.querySelector(".match-card");
+    requestAnimationFrame(() => card && card.classList.add("visible"));
+  }
+
+  async function poll() {
+    if (!sessionCode) {
+      root.innerHTML = '<div id="waiting">No session specified. Add ?session=CB-XXXX to the URL.</div>';
+      return;
+    }
+    try {
+      const res = await fetch(`${WORKER_URL}/session/${sessionCode}`);
+      if (!res.ok) { renderMatch(null); return; }
+      const json = await res.json();
+      if (!json.ok || !json.state) { renderMatch(null); return; }
+      const data = JSON.parse(json.state);
+      const pods = data.pods || [];
+      // The streamed match is the pod flagged liveNow
+      const livePod = pods.find(p => p.liveNow);
+      renderMatch(livePod, data.tournamentName);
+    } catch (e) {
+      // network hiccup: keep last render, don't flash
+    }
+  }
+
+  poll();
+  setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
