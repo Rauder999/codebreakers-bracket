@@ -845,7 +845,7 @@
             const s = srcRow.getBoundingClientRect();
             const d = dstRow.getBoundingClientRect();
             lines.push({ x1: s.right - containerRect.left, y1: s.top + s.height/2 - containerRect.top,
-              x2: d.left - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
+              x2: d.left - containerRect.left, x2R: d.right - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
               key: `${pod.id}-adv-${t.name}`, active: true, isDrop: false, channelX: 0 });
           }
           // Ghost lines when no advances yet
@@ -863,7 +863,7 @@
               const s = srcRow.getBoundingClientRect();
               const d = dstRow.getBoundingClientRect();
               lines.push({ x1: s.right - containerRect.left, y1: s.top + s.height/2 - containerRect.top,
-                x2: d.left - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
+                x2: d.left - containerRect.left, x2R: d.right - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
                 key: `${pod.id}-ghost-${i}`, active: false, isDrop: false, channelX: 0 });
             }
           }
@@ -890,7 +890,7 @@
             const s = srcRow.getBoundingClientRect();
             const d = dstRow.getBoundingClientRect();
             lines.push({ x1: s.right - containerRect.left, y1: s.top + s.height/2 - containerRect.top,
-              x2: d.left - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
+              x2: d.left - containerRect.left, x2R: d.right - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
               key: `${pod.id}-drop-${t.name}`, active: true, isDrop: true, channelX: 0 });
           }
           // Ghost drop lines
@@ -909,7 +909,7 @@
               const s = srcRow.getBoundingClientRect();
               const d = dstRow.getBoundingClientRect();
               lines.push({ x1: s.right - containerRect.left, y1: s.top + s.height/2 - containerRect.top,
-                x2: d.left - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
+                x2: d.left - containerRect.left, x2R: d.right - containerRect.left, y2: d.top + d.height/2 - containerRect.top,
                 key: `${pod.id}-ghostdrop-${i}`, active: false, isDrop: true, channelX: 0 });
             }
           }
@@ -924,18 +924,18 @@
       }
       for (const group of bySource.values()) {
         group.forEach((ln, gi) => {
-          if (ln.isDrop) {
-            // Drop lines exit immediately into the right gutter of the source pod
-            ln.channelX = ln.x1 + 16 + gi * 7;
+          const gap = ln.x2 - ln.x1;
+          if (gap < 12) {
+            // Same-column / stacked (finals): corridor sits RIGHT of both pods and
+            // the line ENTERS THE DEST FROM ITS RIGHT EDGE. Entering at the left
+            // edge would drag the horizontal across the pod (strikethrough bug).
+            ln.x2 = ln.x2R;
+            ln.channelX = Math.max(ln.x1, ln.x2R) + 12 + gi * 5;
           } else {
-            const gap = ln.x2 - ln.x1;
-            if (gap < 40) {
-              // Stacked / same-column (finals): corridor right of both edges
-              ln.channelX = Math.max(ln.x1, ln.x2) + 28 + gi * 7;
-            } else {
-              const base = ln.x1 + Math.max(24, gap * 0.4);
-              ln.channelX = base + gi * 7;
-            }
+            // Normal left-to-right: corridor must stay INSIDE the gutter
+            // (live gutter is only 20px, so no fixed 24px minimum).
+            const base = ln.x1 + Math.max(8, Math.min(gap * 0.4, gap - 8));
+            ln.channelX = Math.min(base + gi * 5, ln.x2 - 6);
           }
         });
       }
