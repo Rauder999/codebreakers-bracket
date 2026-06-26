@@ -174,6 +174,27 @@ function seedsFromImport(
 
 const LOGO_URL = "./CODE_LOGO.png";
 
+interface OngoingSession {
+  code: string;
+  name: string;
+  size: number | null;
+  mode: string | null;
+  host: string | null;
+  updatedAt: string | null;
+}
+
+function timeAgo(iso: string): string {
+  const t = Date.parse(iso);
+  if (!t) return "";
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 export default function Home() {
   const _as = loadAutosave();
   const [screen, setScreen] = useState<"setup" | "bracket">(_as?.screen ?? "setup");
@@ -223,7 +244,12 @@ export default function Home() {
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
   const [tokenError, setTokenError] = useState("");
-  const pendingAction = useRef<"publish" | "unpublish" | null>(null);
+  const pendingAction = useRef<"publish" | "unpublish" | "generate-session" | "delete-session" | null>(null);
+  const pendingGenState = useRef<string | null>(null);
+  const pendingDeleteCode = useRef<string | null>(null);
+  const [ongoingSessions, setOngoingSessions] = useState<OngoingSession[]>([]);
+  const [showOngoing, setShowOngoing] = useState(false);
+  const [ongoingLoading, setOngoingLoading] = useState(false);
 
   // Session
   const [sessionCode, setSessionCode] = useState<string | null>(null);
@@ -248,7 +274,6 @@ export default function Home() {
   useEffect(() => { tournamentNameRef.current = tournamentName; }, [tournamentName]);
 
   // Team list
-  const [teamListCollapsed, setTeamListCollapsed] = useState(false);
 
   // Autosave
   useEffect(() => {
@@ -432,6 +457,14 @@ export default function Home() {
       fetch(`${WORKER_URL}/bracket`, { method: "DELETE", headers: { "X-Admin-Token": token } })
         .then(() => setIsLive(false)).catch(() => {});
     }
+    else if (pendingAction.current === "generate-session") {
+      if (pendingGenState.current) createSessionForState(pendingGenState.current, token);
+      pendingGenState.current = null;
+    }
+    else if (pendingAction.current === "delete-session") {
+      if (pendingDeleteCode.current) doDeleteSession(pendingDeleteCode.current, token);
+      pendingDeleteCode.current = null;
+    }
     pendingAction.current = null;
   };
 
@@ -560,8 +593,8 @@ export default function Home() {
     toast.success(`Session ${code} created!`, { duration: 3000 });
   }, [adminToken, buildSessionState, doPutSession]);
 
-  const handleJoinSession = useCallback(async () => {
-    const code = joinCodeInput.trim().toUpperCase();
+  const joinByCode = useCallback(async (codeRaw: string) => {
+    const code = codeRaw.trim().toUpperCase();
     if (!code) { toast.error("Enter a session code"); return; }
     try {
       const res = await fetch(`${WORKER_URL}/session/${code}`);
@@ -579,10 +612,63 @@ export default function Home() {
       } catch { /* keep current screen */ }
       sessionStorage.setItem("cb_session_code", code);
       sessionStorage.setItem("cb_session_editor", editorNameRef.current || "Operator");
+      setShowOngoing(false);
       toast.success(`Joined session ${code}`);
       setJoinCodeInput("");
     } catch { toast.error("Failed to join session"); }
-  }, [joinCodeInput, adoptServerState]);
+  }, [adoptServerState]);
+
+  const handleJoinSession = useCallback(() => joinByCode(joinCodeInput), [joinByCode, joinCodeInput]);
+
+  // Create a session from an explicit serialized state (used by auto-session on Generate).
+  const createSessionForState = useCallback((stateStr: string, token: string) => {
+    const code = generateSessionCode();
+    setSessionCode(code);
+    sessionCodeRef.current = code;
+    sessionVersionRef.current = 0;
+    myVersionRef.current = 0;
+    setSessionVersion(0);
+    sessionStorage.setItem("cb_session_code", code);
+    sessionStorage.setItem("cb_session_editor", editorNameRef.current || "Operator");
+    doPutSession(code, stateStr, token);
+    toast.success(`Session ${code} created`, { duration: 2500 });
+  }, [doPutSession]);
+
+  // Fetch the list of active tournaments (server-backed, 24h window).
+  const fetchOngoing = useCallback(async () => {
+    setOngoingLoading(true);
+    try {
+      const res = await fetch(`${WORKER_URL}/sessions/active`);
+      const data = await res.json() as { ok: boolean; sessions: OngoingSession[] };
+      if (data.ok) setOngoingSessions(data.sessions || []);
+    } catch { /* ignore */ } finally { setOngoingLoading(false); }
+  }, []);
+
+  const doDeleteSession = useCallback(async (code: string, token: string) => {
+    try {
+      await fetch(`${WORKER_URL}/session/${code}`, { method: "DELETE", headers: { "X-Admin-Token": token } });
+      setOngoingSessions((prev) => prev.filter((s) => s.code !== code));
+      if (sessionCodeRef.current === code) {
+        setSessionCode(null);
+        sessionCodeRef.current = null;
+        sessionStorage.removeItem("cb_session_code");
+        sessionStorage.removeItem("cb_session_editor");
+      }
+      toast.success(`Deleted ${code}`);
+    } catch { toast.error("Failed to delete session"); }
+  }, []);
+
+  const requestDeleteSession = useCallback((code: string) => {
+    if (!adminToken) {
+      pendingDeleteCode.current = code;
+      pendingAction.current = "delete-session";
+      setTokenInput("");
+      setTokenError("");
+      setShowTokenDialog(true);
+      return;
+    }
+    doDeleteSession(code, adminToken);
+  }, [adminToken, doDeleteSession]);
 
   const handleLeaveSession = useCallback(() => {
     setSessionCode(null);
@@ -659,6 +745,20 @@ export default function Home() {
     undoStack.current = [];
     redoStack.current = [];
     setScreen("bracket");
+    // Auto-create a live session so the tournament appears in Ongoing and stays
+    // persisted until deleted. Ask for the admin password once, then silent.
+    if (!sessionCode) {
+      const stateStr = JSON.stringify({ pods: initial, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" });
+      if (adminToken) {
+        createSessionForState(stateStr, adminToken);
+      } else {
+        pendingGenState.current = stateStr;
+        pendingAction.current = "generate-session";
+        setTokenInput("");
+        setTokenError("");
+        setShowTokenDialog(true);
+      }
+    }
   };
 
   const handleTeamClick = useCallback(
@@ -1279,6 +1379,9 @@ export default function Home() {
             <button className="cb-btn generate" style={{ flex: 1 }} onClick={handleGenerate}>
               Generate Bracket
             </button>
+            <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>
+              Connect to Session
+            </button>
             {saves.length > 0 && (
               <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => setShowSavePanel(true)}>
                 Load Saved ({saves.length})
@@ -1478,6 +1581,43 @@ export default function Home() {
         </div>
       )}
 
+      {/* Ongoing Tournaments modal */}
+      {showOngoing && (
+        <div onClick={(e) => { if (e.target === e.currentTarget) setShowOngoing(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
+          <div style={{ width: 540, maxWidth: "92vw", maxHeight: "72vh", background: "#0d0d12", border: "1px solid #7c3aed", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.7)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--cb-border)" }}>
+              <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Ongoing Tournaments</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={fetchOngoing} disabled={ongoingLoading}>{ongoingLoading ? "..." : "Refresh"}</button>
+                <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowOngoing(false)}>X</button>
+              </div>
+            </div>
+            <div style={{ overflow: "auto", flex: 1 }}>
+              {ongoingSessions.length === 0 && (
+                <div style={{ padding: 24, textAlign: "center", color: "var(--cb-muted)", fontSize: 13 }}>{ongoingLoading ? "Loading..." : "No active tournaments"}</div>
+              )}
+              {ongoingSessions.map((s) => (
+                <div key={s.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: "1px solid #15151c", background: s.code === sessionCode ? "rgba(124,58,237,0.12)" : undefined }}>
+                  <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => joinByCode(s.code)}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || "Untitled"}</span>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c4b5fd", letterSpacing: "0.1em" }}>{s.code}</span>
+                      {s.code === sessionCode && <span style={{ fontSize: 9, color: "#34d399", border: "1px solid #10b981", padding: "1px 5px" }}>CURRENT</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--cb-muted)", marginTop: 2 }}>
+                      {[s.size ? `${s.size} teams` : null, s.mode ? (s.mode === "double" ? "Double Elim" : "Single Elim") : null, s.host || null, s.updatedAt ? timeAgo(s.updatedAt) : null].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <button className="cb-btn" style={{ padding: "3px 10px", fontSize: 11, borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => joinByCode(s.code)}>Open</button>
+                  <button className="cb-btn" style={{ padding: "3px 9px", fontSize: 14, lineHeight: 1, borderColor: "#ef4444", color: "#f87171" }} title="Delete tournament" onClick={() => requestDeleteSession(s.code)}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Live indicator */}
       {isLive && screen === "bracket" && !screenshotMode && (
         <div style={{ position: "fixed", top: 10, right: 16, zIndex: 9999, display: "flex", alignItems: "center", gap: 6, background: "rgba(0,0,0,0.85)", border: "1px solid #22c55e", padding: "4px 10px", fontSize: 11, color: "#22c55e", letterSpacing: 1 }}>
@@ -1491,6 +1631,7 @@ export default function Home() {
         <div className="action-bar">
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>New Tournament</button>
+          <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>Ongoing{ongoingSessions.length ? ` (${ongoingSessions.length})` : ""}</button>
           <button className="cb-btn"
             style={{ borderColor: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#7c3aed", color: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#a78bfa", opacity: publishStatus === "publishing" ? 0.6 : 1 }}
             disabled={publishStatus === "publishing"} onClick={() => publishBracket(pods)}>
@@ -1593,36 +1734,6 @@ export default function Home() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Team List Panel (bottom-right, bracket view, not screenshot mode) */}
-      {screen === "bracket" && !screenshotMode && (
-        <div style={{
-          position: "fixed", bottom: 56, right: 16, zIndex: 500,
-          width: 220, maxHeight: teamListCollapsed ? "auto" : "40vh",
-          background: "rgba(10,10,10,0.92)", border: "1px solid var(--cb-border)",
-          fontFamily: "'Saira Condensed', sans-serif",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
-          display: "flex", flexDirection: "column",
-        }}>
-          <div
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", borderBottom: teamListCollapsed ? "none" : "1px solid var(--cb-border)", cursor: "pointer", userSelect: "none" }}
-            onClick={() => setTeamListCollapsed(!teamListCollapsed)}
-          >
-            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.15em", color: "#888899", textTransform: "uppercase" }}>TEAMS ({seeds.length})</span>
-            <span style={{ fontSize: 10, color: "#555566" }}>{teamListCollapsed ? "[+]" : "[-]"}</span>
-          </div>
-          {!teamListCollapsed && (
-            <div style={{ overflow: "auto", flex: 1 }}>
-              {seeds.map((s) => (
-                <div key={s.seed} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderBottom: "1px solid #111118" }}>
-                  <span style={{ fontSize: 10, color: "#555566", minWidth: 22, textAlign: "right" }}>#{s.seed}</span>
-                  <span style={{ fontSize: 12, color: "#b8b8cc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
