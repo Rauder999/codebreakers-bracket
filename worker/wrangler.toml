@@ -1,0 +1,17 @@
+name = "operator-api-rt"
+main = "src/index.js"
+compatibility_date = "2025-05-01"
+
+# Same KV namespace as the current worker (published bracket + active-sessions index).
+kv_namespaces = [
+  { binding = "OPERATOR_KV", id = "c3ed0a2d65ab421eaaf09e15fcce7f83" }
+]
+
+# Durable Object that holds each live session's authoritative state.
+[[durable_objects.bindings]]
+name = "SESSION_ROOM"
+class_name = "SessionRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionRoom"]

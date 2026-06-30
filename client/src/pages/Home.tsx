@@ -235,7 +235,7 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false);
 
   // Publish
-  const WORKER_URL = "https://operator-api.taksatovq.workers.dev";
+  const WORKER_URL = "https://operator-api-rt.taksatovq.workers.dev";
   const [isLive, setIsLive] = useState(false);
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [autoPublish, setAutoPublish] = useState(false);
