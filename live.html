@@ -444,6 +444,9 @@
     let pollTimer = null;
     let galleryTimer = null;
     let _compactActive = false;
+    let ws = null;
+    let wsReconnect = null;
+    const WS_URL = WORKER_URL.replace(/^http/, "ws");
 
     // ─── Routing ─────────────────────────────────────────────────────────────
     function getSessionParam() {
@@ -472,6 +475,7 @@
       document.getElementById("tournamentNameEl").style.display = "none";
       document.getElementById("headerSubtitle").textContent = "LIVE TOURNAMENTS";
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      closeWs();
       currentSession = null;
       // Reset compact state
       if (document.body.classList.contains("compact")) {
@@ -487,6 +491,7 @@
       document.getElementById("gallery-view").style.display = "none";
       document.getElementById("bracket-view").style.display = "block";
       document.getElementById("statusBar").style.display = "flex";
+      connectWs();
     }
 
     function goToCode() {
@@ -551,6 +556,30 @@
     }
 
     // ─── Bracket fetch ────────────────────────────────────────────────────────
+    // Render a serialized session state (shared by the HTTP fetch and the WS push).
+    function applyState(stateStr) {
+      let data;
+      try { data = JSON.parse(stateStr); } catch { return; }
+      const { pods, tournamentMode, tournamentSize, tournamentName, finalsBracket } = data;
+      const nameEl = document.getElementById("tournamentNameEl");
+      if (tournamentName) {
+        nameEl.textContent = tournamentName;
+        nameEl.style.display = "block";
+        document.title = `${tournamentName} - Codebreakers Live`;
+      } else {
+        nameEl.style.display = "none";
+        document.title = `${currentSession} - Codebreakers Live`;
+      }
+      document.getElementById("headerSubtitle").textContent = currentSession;
+      document.getElementById("main").innerHTML =
+        renderBracket(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket });
+      document.getElementById("liveBadge").style.display = "inline-flex";
+      lastUpdated = new Date();
+      updateTimestamp();
+      // Draw connector lines after DOM settles
+      requestAnimationFrame(() => measureConnectors(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket }));
+    }
+
     async function fetchSession() {
       if (!currentSession) return;
       try {
@@ -558,29 +587,33 @@
         if (!res.ok) { showWaiting("Session not found."); return; }
         const json = await res.json();
         if (!json.ok || !json.state) { showWaiting("No bracket data yet."); return; }
-        const data = JSON.parse(json.state);
-        const { pods, tournamentMode, tournamentSize, tournamentName, finalsBracket } = data;
-        // Show tournament name
-        const nameEl = document.getElementById("tournamentNameEl");
-        if (tournamentName) {
-          nameEl.textContent = tournamentName;
-          nameEl.style.display = "block";
-          document.title = `${tournamentName} - Codebreakers Live`;
-        } else {
-          nameEl.style.display = "none";
-          document.title = `${currentSession} - Codebreakers Live`;
-        }
-        document.getElementById("headerSubtitle").textContent = currentSession;
-        document.getElementById("main").innerHTML =
-          renderBracket(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket });
-        document.getElementById("liveBadge").style.display = "inline-flex";
-        lastUpdated = new Date();
-        updateTimestamp();
-        // Draw connector lines after DOM settles
-        requestAnimationFrame(() => measureConnectors(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket }));
+        applyState(json.state);
       } catch {
         document.getElementById("statusText").textContent = "Could not reach server. Retrying...";
       }
+    }
+
+    // ─── Read-only live WebSocket (instant spectator updates) ─────────────────
+    function connectWs() {
+      closeWs();
+      if (!currentSession) return;
+      const code = currentSession;
+      try { ws = new WebSocket(`${WS_URL}/session/${code}/ws`); } catch { scheduleWsReconnect(); return; }
+      ws.onmessage = (ev) => {
+        let data;
+        try { data = JSON.parse(ev.data); } catch { return; }
+        if (data.t === "state" && typeof data.state === "string") applyState(data.state);
+      };
+      ws.onerror = () => { try { ws.close(); } catch {} };
+      ws.onclose = () => { ws = null; scheduleWsReconnect(); };
+    }
+    function scheduleWsReconnect() {
+      if (wsReconnect) clearTimeout(wsReconnect);
+      wsReconnect = setTimeout(() => { if (currentSession) connectWs(); }, 2000);
+    }
+    function closeWs() {
+      if (wsReconnect) { clearTimeout(wsReconnect); wsReconnect = null; }
+      if (ws) { try { ws.onclose = null; ws.close(); } catch {} ws = null; }
     }
 
     function showWaiting(msg) {
