@@ -564,7 +564,8 @@ export default function Home() {
       if (s.formatConfig !== undefined) setFormatConfig(s.formatConfig);
       if (s.globalFormat) setGlobalFormat(s.globalFormat);
       if (s.finalsBracket !== undefined) setFinalsBracket(s.finalsBracket);
-      if (s.screen) setScreen(s.screen);
+      // NOTE: `screen` is intentionally NOT adopted — it's local navigation.
+      // Adopting it here yanked the operator back to Home on every sync.
       sessionVersionRef.current = version;
       setSessionVersion(version);
       if (editor) setLastEditor(editor);
