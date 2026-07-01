@@ -1,17 +1,20 @@
 // ============================================================================
-// Codebreakers operator API — Phase 1a (Durable-Object-backed sessions)
+// Codebreakers operator API — Phase 1b
 // ----------------------------------------------------------------------------
-// Live session state now lives in a Durable Object (strongly consistent, no
-// 60s KV read cache) instead of KV. HTTP endpoints are unchanged, so the
-// existing admin/live frontend works against this worker by only swapping
-// WORKER_URL. WebSocket push is added in Phase 1b.
+// Durable-Object-backed live sessions with:
+//   • WebSocket push (hibernatable) for sub-second, two-way sync
+//   • Semantic per-match mutations (set-placement / set-map / set-stream) that
+//     the DO applies on top of its authoritative state and re-propagates — so
+//     two operators editing DIFFERENT matches never overwrite each other
+//   • Full-state path for structural changes (generate / reset / format)
+//   • Backwards-compatible HTTP endpoints (GET/PUT/DELETE /session/:code,
+//     /sessions/active, /bracket) so older clients keep working
 //
-//   GET    /session/:code            -> current state (from the DO)
-//   PUT    /session/:code            -> apply edit (admin token)         [DO]
-//   DELETE /session/:code            -> delete session (admin token)     [DO]
-//   GET    /sessions/active          -> list of active tournaments       [KV index]
-//   GET/POST/DELETE /bracket         -> published spectator snapshot      [KV]
+// Auth in this phase is still the single ADMIN_TOKEN (Phase 2 swaps this for
+// per-organizer accounts).
 // ============================================================================
+
+import { propagate, getPhaseGraph } from "../../client/src/lib/bracketEngine";
 
 const ADMIN_TOKEN = "operator-2026-pasha";
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -29,6 +32,17 @@ function json(body, status = 200) {
   });
 }
 
+// Mirror of the client's resolveConfig so the DO can propagate authoritatively.
+function resolveConfig(size, mode, globalFormat, overrides, opts) {
+  const graph = getPhaseGraph(size, mode, opts);
+  const cfg = {};
+  for (const ph of graph) {
+    if (ph.id === "gf") { cfg[ph.id] = 2; continue; }
+    cfg[ph.id] = (overrides && overrides[ph.id]) ?? globalFormat;
+  }
+  return cfg;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -37,7 +51,6 @@ export default {
 
     if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
-    // ── Active sessions list (KV index; metadata only) ──────────────────────
     if (path === "/sessions/active" && method === "GET") {
       const list = await env.OPERATOR_KV.list({ prefix: "room:" });
       const now = Date.now();
@@ -60,16 +73,14 @@ export default {
       return json({ ok: true, sessions: active });
     }
 
-    // ── Session routes -> Durable Object (one instance per code) ────────────
-    const m = path.match(/^\/session\/([A-Za-z0-9\-]+)$/);
+    // /session/:code  and  /session/:code/ws  -> Durable Object
+    const m = path.match(/^\/session\/([A-Za-z0-9\-]+)(\/ws)?$/);
     if (m) {
       const code = m[1].toUpperCase();
       const id = env.SESSION_ROOM.idFromName(code);
-      const stub = env.SESSION_ROOM.get(id);
-      return stub.fetch(request);
+      return env.SESSION_ROOM.get(id).fetch(request);
     }
 
-    // ── Published bracket snapshot (KV) for spectators ──────────────────────
     if (path === "/bracket") {
       if (method === "GET") {
         const data = await env.OPERATOR_KV.get("active-bracket");
@@ -93,70 +104,189 @@ export default {
   },
 };
 
-// ── Durable Object: one live session room ─────────────────────────────────
 export class SessionRoom {
   constructor(state, env) {
     this.state = state;
     this.env = env;
+    this.lastKvWrite = 0;
+    try {
+      this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    } catch { /* older runtime */ }
+  }
+
+  async loadDoc() {
+    if (this._loaded) return;
+    this._doc = (await this.state.storage.get("doc")) || null;
+    this._code = (await this.state.storage.get("code")) || null;
+    this._loaded = true;
+  }
+
+  async saveDoc(doc) {
+    this._doc = doc;
+    await this.state.storage.put("doc", doc);
+  }
+
+  async ensureCode(code) {
+    if (code && this._code !== code) {
+      this._code = code;
+      await this.state.storage.put("code", code);
+    }
+  }
+
+  broadcast() {
+    if (!this._doc) return;
+    const msg = JSON.stringify({ t: "state", state: this._doc.state, version: this._doc.version, lastEditor: this._doc.lastEditor });
+    for (const ws of this.state.getWebSockets()) {
+      try { ws.send(msg); } catch { /* ignore closed */ }
+    }
+  }
+
+  async maybeIndex() {
+    const now = Date.now();
+    if (this._code && this._doc && now - this.lastKvWrite > 10000) {
+      this.lastKvWrite = now;
+      const d = this._doc;
+      try {
+        await this.env.OPERATOR_KV.put(`room:${this._code}`, "1", {
+          metadata: { name: d.name, size: d.size, mode: d.mode, host: d.lastEditor, updatedAt: d.updatedAt },
+          expirationTtl: ACTIVE_WINDOW_MS / 1000,
+        });
+      } catch { /* best effort */ }
+    }
   }
 
   async fetch(request) {
     const url = new URL(request.url);
     const method = request.method;
-    const code = (url.pathname.split("/")[2] || "").toUpperCase();
+    const parts = url.pathname.split("/"); // ["", "session", CODE, "ws"?]
+    const code = (parts[2] || "").toUpperCase();
+    const isWs = parts[3] === "ws";
 
-    const meta = (await this.state.storage.get("meta")) || null;
-    const stateStr = (await this.state.storage.get("state"));
+    await this.loadDoc();
+    await this.ensureCode(code);
+
+    if (isWs) {
+      if (request.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });
+      const token = url.searchParams.get("token") || "";
+      const editor = url.searchParams.get("editor") || "Spectator";
+      const canWrite = token === ADMIN_TOKEN;
+
+      const pair = new WebSocketPair();
+      const client = pair[0], server = pair[1];
+      this.state.acceptWebSocket(server);
+      server.serializeAttachment({ canWrite, editor, code });
+
+      if (this._doc) {
+        server.send(JSON.stringify({ t: "state", state: this._doc.state, version: this._doc.version, lastEditor: this._doc.lastEditor }));
+      } else {
+        server.send(JSON.stringify({ t: "empty" }));
+      }
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
     if (method === "GET") {
-      if (stateStr == null) return json({ ok: false, error: "Session not found" }, 404);
-      return json({
-        ok: true,
-        state: stateStr,
-        version: meta.version,
-        lastEditor: meta.lastEditor,
-        name: meta.name,
-        size: meta.size,
-        mode: meta.mode,
-        updatedAt: meta.updatedAt,
-      });
+      if (!this._doc) return json({ ok: false, error: "Session not found" }, 404);
+      const d = this._doc;
+      return json({ ok: true, state: d.state, version: d.version, lastEditor: d.lastEditor, name: d.name, size: d.size, mode: d.mode, updatedAt: d.updatedAt });
     }
 
     if (method === "PUT") {
       if (request.headers.get("X-Admin-Token") !== ADMIN_TOKEN) return json({ ok: false, error: "Unauthorized" }, 401);
       let body;
       try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
-
-      const updatedAt = new Date().toISOString();
-      const next = {
-        version: ((meta && meta.version) || 0) + 1,
-        lastEditor: body.editor || "Unknown",
-        name: body.name || (meta && meta.name) || "Untitled Tournament",
-        size: body.size ?? (meta && meta.size) ?? null,
-        mode: body.mode ?? (meta && meta.mode) ?? null,
-        updatedAt,
-      };
-      await this.state.storage.put("meta", next);
-      await this.state.storage.put("state", body.state);
-
-      // Maintain the KV index so /sessions/active keeps working.
-      try {
-        await this.env.OPERATOR_KV.put(`room:${code}`, "1", {
-          metadata: { name: next.name, size: next.size, mode: next.mode, host: next.lastEditor, updatedAt },
-          expirationTtl: ACTIVE_WINDOW_MS / 1000,
-        });
-      } catch { /* index is best-effort */ }
-
-      return json({ ok: true, version: next.version, lastEditor: next.lastEditor, name: next.name, updatedAt });
+      await this.applyFullState(body.state, body);
+      this.broadcast();
+      await this.maybeIndex();
+      const d = this._doc;
+      return json({ ok: true, version: d.version, lastEditor: d.lastEditor, name: d.name, updatedAt: d.updatedAt });
     }
 
     if (method === "DELETE") {
       if (request.headers.get("X-Admin-Token") !== ADMIN_TOKEN) return json({ ok: false, error: "Unauthorized" }, 401);
       await this.state.storage.deleteAll();
+      this._doc = null;
       try { await this.env.OPERATOR_KV.delete(`room:${code}`); } catch { /* ignore */ }
+      for (const ws of this.state.getWebSockets()) { try { ws.close(1000, "deleted"); } catch { /* ignore */ } }
       return json({ ok: true });
     }
 
     return json({ ok: false, error: "Method not allowed" }, 405);
   }
+
+  // Replace the whole session document (structural changes: generate/reset/format).
+  async applyFullState(stateStr, meta) {
+    const prev = this._doc;
+    const doc = {
+      state: stateStr,
+      version: ((prev && prev.version) || 0) + 1,
+      lastEditor: (meta && meta.editor) || (prev && prev.lastEditor) || "Unknown",
+      name: (meta && meta.name) || (prev && prev.name) || "Untitled Tournament",
+      size: (meta && meta.size) ?? (prev && prev.size) ?? null,
+      mode: (meta && meta.mode) ?? (prev && prev.mode) ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.saveDoc(doc);
+  }
+
+  // Apply a single semantic mutation to the authoritative state and re-propagate.
+  async applyMutation(mut, editor) {
+    if (!this._doc) return false;
+    let s;
+    try { s = JSON.parse(this._doc.state); } catch { return false; }
+    if (!s || !Array.isArray(s.pods)) return false;
+    const pod = s.pods.find((p) => p.id === mut.podId);
+    if (!pod) return false;
+
+    if (mut.t === "set-placement") {
+      if (pod.teams[mut.teamIdx]) pod.teams[mut.teamIdx].placement = mut.placement;
+      const opts = { finalsBracket: !!s.finalsBracket };
+      const cfg = resolveConfig(s.tournamentSize, s.tournamentMode, s.globalFormat, s.formatConfig || {}, opts);
+      s.pods = propagate(s.pods, s.tournamentSize, s.tournamentMode, cfg, opts);
+    } else if (mut.t === "set-map") {
+      pod.map = mut.map;
+    } else if (mut.t === "set-stream") {
+      if (mut.liveNow) { for (const p of s.pods) p.liveNow = false; }
+      pod.onStream = !!mut.onStream;
+      pod.liveNow = !!mut.liveNow;
+    } else {
+      return false;
+    }
+
+    await this.saveDoc({
+      ...this._doc,
+      state: JSON.stringify(s),
+      version: this._doc.version + 1,
+      lastEditor: editor || this._doc.lastEditor,
+      updatedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  // ── Hibernatable WebSocket handlers ──────────────────────────────────────
+  async webSocketMessage(ws, message) {
+    let data;
+    try { data = JSON.parse(message); } catch { return; }
+    const att = (ws.deserializeAttachment && ws.deserializeAttachment()) || {};
+    await this.loadDoc();
+
+    if (data.t === "hello") return; // attachment already set at accept
+
+    if (!att.canWrite) {
+      try { ws.send(JSON.stringify({ t: "error", error: "read-only" })); } catch { /* ignore */ }
+      return;
+    }
+    await this.ensureCode(att.code);
+
+    if (data.t === "full-state") {
+      await this.applyFullState(data.state, { editor: att.editor, name: data.name, size: data.size, mode: data.mode });
+      this.broadcast();
+      await this.maybeIndex();
+    } else if (data.t === "set-placement" || data.t === "set-map" || data.t === "set-stream") {
+      const ok = await this.applyMutation(data, att.editor);
+      if (ok) { this.broadcast(); await this.maybeIndex(); }
+    }
+  }
+
+  async webSocketClose() { /* nothing to clean up */ }
+  async webSocketError() { /* nothing */ }
 }

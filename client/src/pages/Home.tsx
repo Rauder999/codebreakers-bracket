@@ -236,6 +236,7 @@ export default function Home() {
 
   // Publish
   const WORKER_URL = "https://operator-api-rt.taksatovq.workers.dev";
+  const WS_URL = WORKER_URL.replace(/^http/, "ws");
   const [isLive, setIsLive] = useState(false);
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [autoPublish, setAutoPublish] = useState(false);
@@ -264,6 +265,15 @@ export default function Home() {
   const sessionPutInFlight = useRef(false);
   const sessionPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsOutbox = useRef<string[]>([]);
+  const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendMutation = useCallback((mut: Record<string, unknown>) => {
+    const msg = JSON.stringify(mut);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === 1) { try { ws.send(msg); return; } catch { /* fall through to buffer */ } }
+    wsOutbox.current.push(msg); // flushed when the socket (re)connects
+  }, []);
   const sessionVersionRef = useRef(0);
   const sessionCodeRef = useRef<string | null>(null);
   const myVersionRef = useRef(0);
@@ -471,6 +481,10 @@ export default function Home() {
   // ─── Session helpers ──────────────────────────────────────────────────────────
 
   const buildSessionState = useCallback(() => JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen }), [pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen]);
+  // Always-fresh accessor so effects can serialize current state without listing
+  // pods in their deps (which would fire on every result click).
+  const buildSessionStateRef = useRef(buildSessionState);
+  buildSessionStateRef.current = buildSessionState;
 
   const adoptServerState = useCallback((stateStr: string, version: number, editor: string | null) => {
     try {
@@ -524,49 +538,71 @@ export default function Home() {
     }
   }, []);
 
-  // Sync on every change (debounced 800ms)
+  // Sync STRUCTURAL changes (size / mode / seeds / format) as a full snapshot.
+  // Live result/map/stream edits are sent as per-match mutations over WebSocket
+  // (sendMutation), so `pods` is intentionally NOT in these deps.
   useEffect(() => {
     if (!sessionCode || !adminToken) return;
-    if (adoptingRef.current) return; // change came from adopting server state, not a local edit
+    if (adoptingRef.current) return; // change came from adopting server state
     if (sessionDebounceTimer.current) clearTimeout(sessionDebounceTimer.current);
     sessionDebounceTimer.current = setTimeout(() => {
       const code = sessionCodeRef.current;
-      if (!code) return;
-      if (adoptingRef.current) return;
-      doPutSession(code, buildSessionState(), adminToken);
-    }, 800);
-  }, [pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, sessionCode, adminToken, doPutSession, buildSessionState]);
+      if (!code || adoptingRef.current) return;
+      doPutSession(code, buildSessionStateRef.current(), adminToken);
+    }, 600);
+  }, [tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, sessionCode, adminToken, doPutSession]);
 
-  // Polling every 4s
+  // Live sync over WebSocket: receive authoritative state pushes (replaces polling).
   useEffect(() => {
     sessionCodeRef.current = sessionCode;
-    if (!sessionCode) {
-      if (sessionPollTimer.current) { clearInterval(sessionPollTimer.current); sessionPollTimer.current = null; }
-      return;
-    }
-    if (sessionPollTimer.current) clearInterval(sessionPollTimer.current);
-    sessionPollTimer.current = setInterval(async () => {
-      if (sessionPutInFlight.current) return;
+    const closeWs = () => {
+      if (wsReconnectTimer.current) { clearTimeout(wsReconnectTimer.current); wsReconnectTimer.current = null; }
+      if (wsRef.current) { try { wsRef.current.onclose = null; wsRef.current.close(); } catch { /* ignore */ } wsRef.current = null; }
+    };
+    if (!sessionCode) { closeWs(); return; }
+
+    let cancelled = false;
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      if (wsReconnectTimer.current) clearTimeout(wsReconnectTimer.current);
+      wsReconnectTimer.current = setTimeout(connect, 1500);
+    };
+    function connect() {
+      if (cancelled) return;
       const code = sessionCodeRef.current;
       if (!code) return;
+      let ws: WebSocket;
       try {
-        const res = await fetch(`${WORKER_URL}/session/${code}`);
-        if (!res.ok) return;
-        const data = await res.json() as { ok: boolean; state: string; version: number; lastEditor: string };
-        if (!data.ok) return;
-        if (data.version > myVersionRef.current) {
-          myVersionRef.current = data.version;
-          adoptServerState(data.state, data.version, data.lastEditor);
-          if (data.lastEditor && data.lastEditor !== editorNameRef.current) {
-            toast(`Synced changes from ${data.lastEditor}`, { duration: 3000 });
+        ws = new WebSocket(`${WS_URL}/session/${code}/ws?token=${encodeURIComponent(adminToken || "")}&editor=${encodeURIComponent(editorNameRef.current || "Operator")}`);
+      } catch { scheduleReconnect(); return; }
+      wsRef.current = ws;
+      ws.onopen = () => {
+        const out = wsOutbox.current; wsOutbox.current = [];
+        for (const msg of out) { try { ws.send(msg); } catch { /* ignore */ } }
+        setSyncStatus("synced");
+        setTimeout(() => setSyncStatus("idle"), 1500);
+      };
+      ws.onmessage = (ev) => {
+        let data: { t?: string; state?: string; version?: number; lastEditor?: string };
+        try { data = JSON.parse(ev.data as string); } catch { return; }
+        if (data.t === "state" && typeof data.state === "string" && typeof data.version === "number") {
+          if (data.version > myVersionRef.current) {
+            myVersionRef.current = data.version;
+            adoptServerState(data.state, data.version, data.lastEditor ?? null);
+            if (data.lastEditor && data.lastEditor !== editorNameRef.current) {
+              toast(`Synced changes from ${data.lastEditor}`, { duration: 2500 });
+            }
+            setSyncStatus("synced");
+            setTimeout(() => setSyncStatus("idle"), 1500);
           }
-          setSyncStatus("synced");
-          setTimeout(() => setSyncStatus("idle"), 2000);
         }
-      } catch { /* ignore */ }
-    }, 4000);
-    return () => { if (sessionPollTimer.current) clearInterval(sessionPollTimer.current); };
-  }, [sessionCode, adoptServerState]);
+      };
+      ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
+      ws.onclose = () => { if (!cancelled) scheduleReconnect(); };
+    }
+    connect();
+    return () => { cancelled = true; closeWs(); };
+  }, [sessionCode, adminToken, adoptServerState]);
 
   const generateSessionCode = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -790,6 +826,10 @@ export default function Home() {
         const cfg = resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts);
         const result = propagate(newPods, tournamentSize, tournamentMode, cfg, engineOpts);
 
+        // Send the single result as a mutation; the DO re-propagates authoritatively
+        // so two operators editing different matches never overwrite each other.
+        sendMutation({ t: "set-placement", podId, teamIdx, placement: newPlacement });
+
         if (autoPublish) {
           if (autoPublishTimer.current) clearTimeout(autoPublishTimer.current);
           autoPublishTimer.current = setTimeout(() => publishBracket(result), 1000);
@@ -798,7 +838,7 @@ export default function Home() {
         return result;
       });
     },
-    [tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts, autoPublish, publishBracket, setPodsWithHistory]
+    [tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts, autoPublish, publishBracket, setPodsWithHistory, sendMutation]
   );
 
   const handleReset = () => {
@@ -809,6 +849,10 @@ export default function Home() {
     const currentMaps = new Map(pods.map((p) => [p.id, p.map]));
     const withMaps = fresh.map((p) => ({ ...p, map: currentMaps.get(p.id) ?? p.map }));
     setPodsWithHistory(withMaps);
+    // Reset is a full replacement -> push the whole snapshot.
+    if (sessionCodeRef.current && adminToken) {
+      doPutSession(sessionCodeRef.current, JSON.stringify({ pods: withMaps, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" }), adminToken);
+    }
   };
 
   const handleNewTournament = () => {
@@ -850,7 +894,8 @@ export default function Home() {
   const setPodMap = useCallback((podId: string, mapName: string) => {
     setPodsWithHistory(prev => prev.map(p => p.id === podId ? { ...p, map: mapName } : p));
     setMapPickerPod(null);
-  }, [setPodsWithHistory]);
+    sendMutation({ t: "set-map", podId, map: mapName });
+  }, [setPodsWithHistory, sendMutation]);
 
   // Toggle which match is being streamed (only one at a time)
   // Cycle a pod's stream state: off -> onStream -> liveNow -> off.
@@ -863,6 +908,7 @@ export default function Home() {
       if (!target.onStream && !target.liveNow) next = "onStream";
       else if (target.onStream && !target.liveNow) next = "liveNow";
       else next = "off";
+      sendMutation({ t: "set-stream", podId, onStream: next !== "off", liveNow: next === "liveNow" });
       return prev.map(p => {
         if (p.id === podId) {
           if (next === "off") return { ...p, onStream: false, liveNow: false };
@@ -873,7 +919,7 @@ export default function Home() {
         return next === "liveNow" ? { ...p, liveNow: false } : p;
       });
     });
-  }, [setPodsWithHistory]);
+  }, [setPodsWithHistory, sendMutation]);
 
   // CSV import
   const handleCsvFetch = async () => {
