@@ -195,39 +195,61 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-// Live schematic preview of the bracket structure for the current settings.
-// Each box is a match; the number in it is how many teams play that match.
+function shortLabel(l: string): string {
+  return l
+    .replace("GROUP STAGE", "GROUPS").replace("QUARTERFINALS", "QUARTERS")
+    .replace("SEMIFINALS", "SEMIS").replace("SEMIFINAL", "SEMI")
+    .replace("CASH-OUT FINAL", "CASH-OUT").replace("GRAND FINAL", "GRAND F.")
+    .replace("ROUND ", "R");
+}
+
+// Live SVG preview of the bracket structure. Green solid = advances to the next
+// round; orange dashed = losers dropping from a Winners block into the Losers
+// Bracket. N×K on a node means N matches of K teams each.
 function BracketPreview({ size, mode, opts, config }: { size: Size; mode: TournamentMode; opts: EngineOptions; config: FormatConfig }) {
   const graph = getPhaseGraph(size, mode, opts);
-  const phaseCol = (phase: { id: string; label: string; bracket: string; inputCount: number }) => {
-    const ps = effectivePodSize(phase as unknown as Parameters<typeof effectivePodSize>[0], config);
-    const podCount = phase.id === "fbracket" ? 2 : Math.max(1, Math.ceil(phase.inputCount / ps));
-    const bg = phase.bracket === "gf" ? "rgba(245,158,11,0.15)" : phase.bracket === "lb" ? "rgba(249,115,22,0.12)" : "rgba(124,58,237,0.12)";
-    return (
-      <div key={phase.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-        <div style={{ fontSize: 7.5, color: "#7a7a8a", textTransform: "uppercase", letterSpacing: "0.03em", textAlign: "center", width: 46, minHeight: 18, lineHeight: 1.1 }}>{phase.label}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, justifyContent: "center", flex: 1 }}>
-          {Array.from({ length: podCount }).map((_, i) => (
-            <div key={i} title={`${ps}-team match`} style={{ width: 40, height: 14, border: "1px solid #3a3a4a", borderRadius: 2, background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#c4b5fd" }}>{ps}</div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-  const wb = graph.filter((p) => p.bracket === "wb");
-  const lb = graph.filter((p) => p.bracket === "lb");
-  const gf = graph.filter((p) => p.bracket === "gf");
+  const psOf = (p: Parameters<typeof effectivePodSize>[0]) => effectivePodSize(p, config);
+  const pcOf = (p: Parameters<typeof effectivePodSize>[0]) => p.id === "fbracket" ? 2 : Math.max(1, Math.ceil(p.inputCount / psOf(p)));
+
+  const top = graph.filter((p) => p.bracket === "wb" || p.bracket === "gf");
+  const bot = graph.filter((p) => p.bracket === "lb");
+  const colW = 84, nodeW = 64, nodeH = 32, marginX = 14, topY = 30;
+  const botY = bot.length ? topY + 116 : topY;
+  type P = { x: number; y: number; w: number; h: number; cx: number; cy: number };
+  const pos: Record<string, P> = {};
+  top.forEach((p, i) => { const x = marginX + i * colW; pos[p.id] = { x, y: topY, w: nodeW, h: nodeH, cx: x + nodeW / 2, cy: topY + nodeH / 2 }; });
+  bot.forEach((p, i) => { const x = marginX + i * colW; pos[p.id] = { x, y: botY, w: nodeW, h: nodeH, cx: x + nodeW / 2, cy: botY + nodeH / 2 }; });
+  const width = marginX * 2 + Math.max(top.length, bot.length, 1) * colW;
+  const height = botY + nodeH + 14;
+
+  const adv: [string, string][] = [];
+  const drop: [string, string][] = [];
+  for (const p of graph) {
+    if (p.advanceTo && pos[p.advanceTo]) adv.push([p.id, p.advanceTo]);
+    if (mode === "double" && p.dropTo && !p.hasNoLBDrop && pos[p.dropTo]) drop.push([p.id, p.dropTo]);
+  }
+  const strokeFor = (b: string) => b === "gf" ? "#f59e0b" : b === "lb" ? "#f97316" : "#7c3aed";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontSize: 9, color: "#a78bfa", letterSpacing: "0.08em", textTransform: "uppercase" }}>Winners → Final</div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>{[...wb, ...gf].map(phaseCol)}</div>
-      {lb.length > 0 && (
-        <>
-          <div style={{ fontSize: 9, color: "#f59e0b", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 4 }}>Losers bracket</div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>{lb.map(phaseCol)}</div>
-        </>
-      )}
-      <div style={{ fontSize: 9, color: "#66667a", marginTop: 4, lineHeight: 1.4 }}>Each box is a match; the number is how many teams play in it. Teams fill in after you generate.</div>
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: "block" }} fontFamily="'Saira Condensed', sans-serif">
+        <text x={marginX} y={topY - 12} fill="#a78bfa" fontSize={9} letterSpacing={1.5}>WINNERS BRACKET → FINALS</text>
+        {bot.length > 0 && <text x={marginX} y={botY - 12} fill="#f59e0b" fontSize={9} letterSpacing={1.5}>LOSERS BRACKET</text>}
+        {adv.map(([a, b], i) => { const s = pos[a], t = pos[b]; return <path key={"a" + i} d={`M ${s.x + s.w} ${s.cy} C ${s.x + s.w + 18} ${s.cy}, ${t.x - 18} ${t.cy}, ${t.x} ${t.cy}`} stroke="#22c55e" strokeWidth={1.2} fill="none" opacity={0.6} />; })}
+        {drop.map(([a, b], i) => { const s = pos[a], t = pos[b]; const my = (s.y + s.h + t.y) / 2; return <path key={"d" + i} d={`M ${s.cx} ${s.y + s.h} C ${s.cx} ${my}, ${t.cx} ${my}, ${t.cx} ${t.y}`} stroke="#f97316" strokeWidth={1.3} strokeDasharray="4 3" fill="none" opacity={0.85} />; })}
+        {graph.map((p) => { const n = pos[p.id]; if (!n) return null; const c = strokeFor(p.bracket); return (
+          <g key={p.id}>
+            <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={3} fill={c + "22"} stroke={c} strokeWidth={1} />
+            <text x={n.cx} y={n.y + 13} textAnchor="middle" fill="#d8d8e8" fontSize={7}>{shortLabel(p.label)}</text>
+            <text x={n.cx} y={n.y + 25} textAnchor="middle" fill={c === "#7c3aed" ? "#c4b5fd" : c} fontSize={9} fontWeight={700}>{pcOf(p)}×{psOf(p)}</text>
+          </g>
+        ); })}
+      </svg>
+      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 9, color: "#888899" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#22c55e" strokeWidth={2} /></svg>advances</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" /></svg>drops to losers</span>
+      </div>
+      <div style={{ fontSize: 9, color: "#66667a", marginTop: 6, lineHeight: 1.4 }}>Teams fill in after you generate.</div>
     </div>
   );
 }
@@ -1340,7 +1362,7 @@ export default function Home() {
           </div>
           {/* Live bracket preview — wide screens only, updates as you change format */}
           {previewWide && (
-            <div style={{ position: "fixed", top: 88, right: 24, width: 288, maxHeight: "78vh", overflowY: "auto", zIndex: 500, background: "rgba(13,13,18,0.96)", border: "1px solid #2a2a38", borderRadius: 4, padding: "14px 16px", fontFamily: "'Saira Condensed', sans-serif" }}>
+            <div style={{ position: "fixed", top: 76, right: 24, width: 400, maxHeight: "82vh", overflowY: "auto", zIndex: 500, background: "rgba(13,13,18,0.96)", border: "1px solid #2a2a38", borderRadius: 4, padding: "16px 18px", fontFamily: "'Saira Condensed', sans-serif" }}>
               <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Live Preview</div>
               <div style={{ fontSize: 10, color: "#888899", margin: "4px 0 10px" }}>{tournamentSize} teams · {tournamentMode === "double" ? "Double Elimination" : "Single Elimination"}</div>
               <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
