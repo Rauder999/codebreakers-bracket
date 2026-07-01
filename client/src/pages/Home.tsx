@@ -793,6 +793,7 @@ export default function Home() {
   }, []);
 
   const requestDeleteSession = useCallback((code: string) => {
+    if (!window.confirm(`Delete tournament ${code}? This permanently removes it and cannot be undone.`)) return;
     if (!adminToken) {
       pendingDeleteCode.current = code;
       pendingAction.current = "delete-session";
@@ -1276,6 +1277,23 @@ export default function Home() {
       {/* Setup Screen */}
       {screen === "setup" && (
         <div className="setup-screen">
+          {/* Top-right account / invites / back-to-tournament cluster */}
+          <div style={{ position: "fixed", top: 12, right: 16, zIndex: 600, display: "flex", gap: 8, alignItems: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
+            {pods.length > 0 && (
+              <button className="cb-btn" style={{ borderColor: "#22c55e", color: "#4ade80" }} onClick={() => setScreen("bracket")}>← Back to tournament</button>
+            )}
+            {authKind === "master" && (
+              <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => { setShowInvites(true); fetchInvites(); }}>Invites</button>
+            )}
+            {adminToken ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--cb-muted)" }}>
+                <span style={{ color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>
+                <button className="cb-btn" style={{ padding: "3px 8px", fontSize: 11 }} onClick={logout}>Sign out</button>
+              </span>
+            ) : (
+              <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in / Register</button>
+            )}
+          </div>
           {/* Mode selector */}
           <div className="setup-title">Tournament Mode</div>
           <div className="mode-selector">
@@ -1540,10 +1558,6 @@ export default function Home() {
             </button>
             <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>
               Connect to Session
-            </button>
-            <button className="cb-btn" style={{ padding: "12px 20px", fontSize: 14, fontWeight: 700, borderColor: adminToken ? "#333340" : "#7c3aed", color: adminToken ? "var(--cb-muted)" : "#a78bfa" }}
-              onClick={() => { if (adminToken) { logout(); } else { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); } }}>
-              {adminToken ? `${authKind === "master" ? "Super-admin" : authName} · Sign out` : "Sign in / Register"}
             </button>
             {saves.length > 0 && (
               <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => setShowSavePanel(true)}>
@@ -1841,19 +1855,9 @@ export default function Home() {
       {screen === "bracket" && !screenshotMode && (
         <div className="action-bar">
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
-          <button className="cb-btn" onClick={handleNewTournament}>New Tournament</button>
+          <button className="cb-btn" onClick={handleNewTournament}>Home</button>
           <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>Ongoing{ongoingSessions.length ? ` (${ongoingSessions.length})` : ""}</button>
-          {authKind === "master" && (
-            <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => { setShowInvites(true); fetchInvites(); }}>Invites</button>
-          )}
-          {adminToken ? (
-            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--cb-muted)" }}>
-              <span style={{ color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>
-              <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10 }} onClick={logout}>Sign out</button>
-            </span>
-          ) : (
-            <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in</button>
-          )}
+          {adminToken && <span style={{ fontSize: 11, color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>}
           <button className="cb-btn"
             style={{ borderColor: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#7c3aed", color: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#a78bfa", opacity: publishStatus === "publishing" ? 0.6 : 1 }}
             disabled={publishStatus === "publishing"} onClick={() => publishBracket(pods)}>
@@ -1866,7 +1870,6 @@ export default function Home() {
             <input type="checkbox" checked={autoPublish} onChange={(e) => setAutoPublish(e.target.checked)} style={{ accentColor: "#7c3aed" }} />
             Auto-publish
           </label>
-          <button className="cb-btn" onClick={handleScreenshot}>Screenshot Mode</button>
           <button className="cb-btn" onClick={handleCompact} style={compactMode ? { borderColor: "#9b6dff", color: "#9b6dff" } : undefined}>{compactMode ? "Normal" : "Compact"}</button>
           <button className="cb-btn" onClick={handleExportPng} style={{ borderColor: "#10b981", color: "#34d399" }}>Export PNG</button>
           <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => setShowSavePanel(true)}>...</button>
