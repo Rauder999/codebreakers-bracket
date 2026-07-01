@@ -651,6 +651,7 @@ export default function Home() {
         setTimeout(() => setSyncStatus("idle"), 1500);
       };
       ws.onmessage = (ev) => {
+        if (code !== sessionCodeRef.current) return; // stale socket from a previous session
         let data: { t?: string; state?: string; version?: number; lastEditor?: string };
         try { data = JSON.parse(ev.data as string); } catch { return; }
         if (data.t === "state" && typeof data.state === "string" && typeof data.version === "number") {
@@ -896,19 +897,17 @@ export default function Home() {
     undoStack.current = [];
     redoStack.current = [];
     setScreen("bracket");
-    // Auto-create a live session so the tournament appears in Ongoing and stays
-    // persisted until deleted. Ask for the admin password once, then silent.
-    if (!sessionCode) {
-      const stateStr = JSON.stringify({ pods: initial, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" });
-      if (adminToken) {
-        createSessionForState(stateStr, adminToken);
-      } else {
-        pendingGenState.current = stateStr;
-        pendingAction.current = "generate-session";
-        setTokenInput("");
-        setTokenError("");
-        setShowTokenDialog(true);
-      }
+    // ALWAYS start a fresh session. Any previous tournament stays on the server
+    // (visible in Connect to Session) until deleted, and never mixes into this one.
+    const stateStr = JSON.stringify({ pods: initial, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" });
+    if (adminToken) {
+      createSessionForState(stateStr, adminToken);
+    } else {
+      pendingGenState.current = stateStr;
+      pendingAction.current = "generate-session";
+      setTokenInput("");
+      setTokenError("");
+      setShowTokenDialog(true);
     }
   };
 
@@ -1857,7 +1856,6 @@ export default function Home() {
         <div className="action-bar">
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>Home</button>
-          <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>Ongoing{ongoingSessions.length ? ` (${ongoingSessions.length})` : ""}</button>
           {adminToken && <span style={{ fontSize: 11, color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>}
           <button className="cb-btn"
             style={{ borderColor: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#7c3aed", color: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#a78bfa", opacity: publishStatus === "publishing" ? 0.6 : 1 }}
