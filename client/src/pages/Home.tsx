@@ -301,21 +301,29 @@ export default function Home() {
     });
   }, []);
 
+  // Serialize a full snapshot with explicit pods — used to sync undo/redo, which
+  // replace the whole pods array rather than sending a single per-match mutation.
+  const buildStateWithPods = useCallback((podsArg: Pod[]) => JSON.stringify({ pods: podsArg, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen }), [tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen]);
+  const buildStateWithPodsRef = useRef(buildStateWithPods);
+  buildStateWithPodsRef.current = buildStateWithPods;
+
   const handleUndo = useCallback(() => {
     if (undoStack.current.length === 0) return;
     const prev = undoStack.current[undoStack.current.length - 1];
     undoStack.current = undoStack.current.slice(0, -1);
     setPods((cur) => { redoStack.current = [...redoStack.current, cur]; return prev; });
+    if (sessionCodeRef.current) sendMutation({ t: "full-state", state: buildStateWithPodsRef.current(prev) });
     toast("Undo", { description: "Last action undone", duration: 1500 });
-  }, []);
+  }, [sendMutation]);
 
   const handleRedo = useCallback(() => {
     if (redoStack.current.length === 0) return;
     const next = redoStack.current[redoStack.current.length - 1];
     redoStack.current = redoStack.current.slice(0, -1);
     setPods((cur) => { undoStack.current = [...undoStack.current, cur]; return next; });
+    if (sessionCodeRef.current) sendMutation({ t: "full-state", state: buildStateWithPodsRef.current(next) });
     toast("Redo", { description: "Action re-applied", duration: 1500 });
-  }, []);
+  }, [sendMutation]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
