@@ -195,6 +195,43 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// Live schematic preview of the bracket structure for the current settings.
+// Each box is a match; the number in it is how many teams play that match.
+function BracketPreview({ size, mode, opts, config }: { size: Size; mode: TournamentMode; opts: EngineOptions; config: FormatConfig }) {
+  const graph = getPhaseGraph(size, mode, opts);
+  const phaseCol = (phase: { id: string; label: string; bracket: string; inputCount: number }) => {
+    const ps = effectivePodSize(phase as unknown as Parameters<typeof effectivePodSize>[0], config);
+    const podCount = phase.id === "fbracket" ? 2 : Math.max(1, Math.ceil(phase.inputCount / ps));
+    const bg = phase.bracket === "gf" ? "rgba(245,158,11,0.15)" : phase.bracket === "lb" ? "rgba(249,115,22,0.12)" : "rgba(124,58,237,0.12)";
+    return (
+      <div key={phase.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+        <div style={{ fontSize: 7.5, color: "#7a7a8a", textTransform: "uppercase", letterSpacing: "0.03em", textAlign: "center", width: 46, minHeight: 18, lineHeight: 1.1 }}>{phase.label}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, justifyContent: "center", flex: 1 }}>
+          {Array.from({ length: podCount }).map((_, i) => (
+            <div key={i} title={`${ps}-team match`} style={{ width: 40, height: 14, border: "1px solid #3a3a4a", borderRadius: 2, background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#c4b5fd" }}>{ps}</div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+  const wb = graph.filter((p) => p.bracket === "wb");
+  const lb = graph.filter((p) => p.bracket === "lb");
+  const gf = graph.filter((p) => p.bracket === "gf");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 9, color: "#a78bfa", letterSpacing: "0.08em", textTransform: "uppercase" }}>Winners → Final</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>{[...wb, ...gf].map(phaseCol)}</div>
+      {lb.length > 0 && (
+        <>
+          <div style={{ fontSize: 9, color: "#f59e0b", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 4 }}>Losers bracket</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto" }}>{lb.map(phaseCol)}</div>
+        </>
+      )}
+      <div style={{ fontSize: 9, color: "#66667a", marginTop: 4, lineHeight: 1.4 }}>Each box is a match; the number is how many teams play in it. Teams fill in after you generate.</div>
+    </div>
+  );
+}
+
 export default function Home() {
   const _as = loadAutosave();
   const [screen, setScreen] = useState<"setup" | "bracket">(_as?.screen ?? "setup");
@@ -282,6 +319,12 @@ export default function Home() {
   const [invitesList, setInvitesList] = useState<{ code: string; note: string; usedBy: string | null; createdAt: string | null }[]>([]);
   const [invitesLoading, setInvitesLoading] = useState(false);
   const [newInviteNote, setNewInviteNote] = useState("");
+  const [previewWide, setPreviewWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1250);
+  useEffect(() => {
+    const onResize = () => setPreviewWide(window.innerWidth >= 1250);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // Session
   const [sessionCode, setSessionCode] = useState<string | null>(null);
@@ -1279,6 +1322,7 @@ export default function Home() {
         <div className="setup-screen">
           {/* Top-right account / invites / back-to-tournament cluster */}
           <div style={{ position: "fixed", top: 12, right: 16, zIndex: 600, display: "flex", gap: 8, alignItems: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
+            <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/live.html"); toast.success("Gallery link copied — shows all live tournaments"); }}>Gallery link</button>
             {pods.length > 0 && (
               <button className="cb-btn" style={{ borderColor: "#22c55e", color: "#4ade80" }} onClick={() => setScreen("bracket")}>← Back to tournament</button>
             )}
@@ -1294,6 +1338,14 @@ export default function Home() {
               <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in / Register</button>
             )}
           </div>
+          {/* Live bracket preview — wide screens only, updates as you change format */}
+          {previewWide && (
+            <div style={{ position: "fixed", top: 88, right: 24, width: 288, maxHeight: "78vh", overflowY: "auto", zIndex: 500, background: "rgba(13,13,18,0.96)", border: "1px solid #2a2a38", borderRadius: 4, padding: "14px 16px", fontFamily: "'Saira Condensed', sans-serif" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Live Preview</div>
+              <div style={{ fontSize: 10, color: "#888899", margin: "4px 0 10px" }}>{tournamentSize} teams · {tournamentMode === "double" ? "Double Elimination" : "Single Elimination"}</div>
+              <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
+            </div>
+          )}
           {/* Mode selector */}
           <div className="setup-title">Tournament Mode</div>
           <div className="mode-selector">
@@ -1495,62 +1547,14 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Session panel on setup screen */}
-          <div className="setup-title" style={{ marginTop: "28px" }}>
-            <span>Session</span>
-            <button className="cb-btn" style={{ marginLeft: 12, padding: "4px 12px", fontSize: 11 }} onClick={() => setShowSessionPanel(!showSessionPanel)}>
-              {showSessionPanel ? "Hide" : "Show"}
-            </button>
+          {/* Tournament details — name is shown to spectators, your name to co-editors */}
+          <div className="setup-title" style={{ marginTop: "28px" }}>Tournament Details</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
+            <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em" }}>Tournament name (shown to spectators)</div>
+            <input className="team-input" type="text" value={tournamentName} onChange={(e) => { setTournamentName(e.target.value); sessionStorage.setItem("cb_session_name", e.target.value); }} placeholder="e.g. CODE Big League..." />
+            <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em", marginTop: 4 }}>Your name (shown to co-editors)</div>
+            <input className="team-input" type="text" value={editorName} onChange={(e) => { setEditorName(e.target.value); localStorage.setItem("cb_editor", e.target.value); }} placeholder="Your name..." />
           </div>
-          {showSessionPanel && (
-            <div style={{ background: "#111115", border: "1px solid var(--cb-border)", padding: "16px", marginBottom: 8, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em" }}>Tournament name (shown in gallery)</div>
-              <input
-                className="team-input"
-                type="text"
-                value={tournamentName}
-                onChange={(e) => { setTournamentName(e.target.value); sessionStorage.setItem("cb_session_name", e.target.value); }}
-                placeholder="e.g. CODE Big League..."
-                style={{ maxWidth: 320 }}
-              />
-              <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em", marginTop: 4 }}>Your name (shown to co-editor)</div>
-              <input
-                className="team-input"
-                type="text"
-                value={editorName}
-                onChange={(e) => { setEditorName(e.target.value); localStorage.setItem("cb_editor", e.target.value); }}
-                placeholder="Your name..."
-                style={{ maxWidth: 260 }}
-              />
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={handleCreateSession}>
-                  Create Session
-                </button>
-                {sessionCode && (
-                  <>
-                    <span style={{ fontFamily: "'Saira Condensed', monospace", fontSize: 15, fontWeight: 800, color: "#c4b5fd", letterSpacing: "0.15em", background: "rgba(124,58,237,0.15)", padding: "4px 10px", border: "1px solid #7c3aed" }}>{sessionCode}</span>
-                    <button className="cb-btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => { navigator.clipboard.writeText(sessionCode); toast("Code copied!"); }}>Copy Code</button>
-                    <button className="cb-btn" style={{ fontSize: 11, padding: "4px 10px", borderColor: "#10b981", color: "#34d399" }} onClick={() => { navigator.clipboard.writeText(`https://rauder999.github.io/codebreakers-bracket/live.html?session=${sessionCode}`); toast.success("Live link copied!"); }}>Copy Live Link</button>
-                    <button className="cb-btn" style={{ fontSize: 11, padding: "4px 10px", borderColor: "#ef4444", color: "#f87171" }} onClick={handleLeaveSession}>Leave</button>
-                  </>
-                )}
-              </div>
-              <div style={{ borderTop: "1px solid var(--cb-border)", paddingTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  className="team-input"
-                  type="text"
-                  value={joinCodeInput}
-                  onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                  placeholder="CB-XXXX"
-                  style={{ maxWidth: 120, letterSpacing: "0.1em" }}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleJoinSession(); }}
-                />
-                <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={handleJoinSession}>
-                  Join Session
-                </button>
-              </div>
-            </div>
-          )}
 
           <div style={{ display: "flex", gap: 10, marginTop: 0 }}>
             <button className="cb-btn generate" style={{ flex: 1 }} onClick={handleGenerate}>
@@ -1857,7 +1861,6 @@ export default function Home() {
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>Home</button>
           {adminToken && <span style={{ fontSize: 11, color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>}
-          <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/live.html"); toast.success("Gallery link copied — shows all live tournaments"); }}>Gallery link</button>
           <button className="cb-btn" onClick={handleCompact} style={compactMode ? { borderColor: "#9b6dff", color: "#9b6dff" } : undefined}>{compactMode ? "Normal" : "Compact"}</button>
           <button className="cb-btn" onClick={handleExportPng} style={{ borderColor: "#10b981", color: "#34d399" }}>Export PNG</button>
           <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => setShowSavePanel(true)}>...</button>
