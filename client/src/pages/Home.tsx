@@ -241,10 +241,37 @@ export default function Home() {
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [autoPublish, setAutoPublish] = useState(false);
   const autoPublishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [adminToken, setAdminToken] = useState<string>(() => sessionStorage.getItem("cb_admin_token") || "");
+  // adminToken now holds the auth credential sent to the worker: either the
+  // super-admin master password OR a signed account token (organizer). Persisted
+  // to localStorage so organizers stay signed in across restarts.
+  const [adminToken, setAdminToken] = useState<string>(() => localStorage.getItem("cb_auth_token") || sessionStorage.getItem("cb_admin_token") || "");
+  const [authKind, setAuthKind] = useState<string>(() => localStorage.getItem("cb_auth_kind") || "");
+  const [authName, setAuthName] = useState<string>(() => localStorage.getItem("cb_auth_name") || "");
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
   const [tokenError, setTokenError] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "master">("login");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [fLoginName, setFLoginName] = useState("");
+  const [fLoginPass, setFLoginPass] = useState("");
+  const [fRegInvite, setFRegInvite] = useState("");
+  const [fRegName, setFRegName] = useState("");
+  const [fRegPass, setFRegPass] = useState("");
+  const applyAuth = useCallback((token: string, kind: string, name: string) => {
+    setAdminToken(token); setAuthKind(kind); setAuthName(name);
+    localStorage.setItem("cb_auth_token", token);
+    localStorage.setItem("cb_auth_kind", kind);
+    localStorage.setItem("cb_auth_name", name);
+    sessionStorage.setItem("cb_admin_token", token);
+  }, []);
+  const logout = useCallback(() => {
+    setAdminToken(""); setAuthKind(""); setAuthName("");
+    localStorage.removeItem("cb_auth_token");
+    localStorage.removeItem("cb_auth_kind");
+    localStorage.removeItem("cb_auth_name");
+    sessionStorage.removeItem("cb_admin_token");
+    toast("Signed out", { duration: 1500 });
+  }, []);
   const pendingAction = useRef<"publish" | "unpublish" | "generate-session" | "delete-session" | null>(null);
   const pendingGenState = useRef<string | null>(null);
   const pendingDeleteCode = useRef<string | null>(null);
@@ -463,13 +490,7 @@ export default function Home() {
     } catch { /* ignore */ }
   }, [adminToken]);
 
-  const handleTokenSubmit = () => {
-    if (!tokenInput.trim()) { setTokenError("Enter admin password"); return; }
-    const token = tokenInput.trim();
-    setAdminToken(token);
-    sessionStorage.setItem("cb_admin_token", token);
-    setShowTokenDialog(false);
-    setTokenError("");
+  const runPendingAuthAction = (token: string) => {
     if (pendingAction.current === "publish") doPublish(pods, token);
     else if (pendingAction.current === "unpublish") {
       fetch(`${WORKER_URL}/bracket`, { method: "DELETE", headers: { "X-Admin-Token": token } })
@@ -484,6 +505,40 @@ export default function Home() {
       pendingDeleteCode.current = null;
     }
     pendingAction.current = null;
+  };
+
+  const handleTokenSubmit = async () => {
+    setTokenError("");
+    setAuthBusy(true);
+    try {
+      let token = "", kind = "account", name = "";
+      if (authMode === "master") {
+        token = tokenInput.trim();
+        if (!token) { setTokenError("Enter the master password"); setAuthBusy(false); return; }
+        const res = await fetch(`${WORKER_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+        const d = await res.json().catch(() => ({}));
+        if (!d.ok || d.kind !== "master") { setTokenError("Wrong master password"); setAuthBusy(false); return; }
+        kind = "master"; name = "Super-admin";
+      } else if (authMode === "login") {
+        const res = await fetch(`${WORKER_URL}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: fLoginName.trim(), password: fLoginPass }) });
+        const d = await res.json().catch(() => ({}));
+        if (!d.ok) { setTokenError(d.error || "Login failed"); setAuthBusy(false); return; }
+        token = d.token; name = d.name;
+      } else {
+        const res = await fetch(`${WORKER_URL}/auth/redeem`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ invite: fRegInvite.trim(), name: fRegName.trim(), password: fRegPass }) });
+        const d = await res.json().catch(() => ({}));
+        if (!d.ok) { setTokenError(d.error || "Registration failed"); setAuthBusy(false); return; }
+        token = d.token; name = d.name;
+      }
+      applyAuth(token, kind, name);
+      setShowTokenDialog(false);
+      setTokenInput(""); setFLoginPass(""); setFRegPass("");
+      toast.success(kind === "master" ? "Signed in as Super-admin" : `Signed in as ${name}`);
+      runPendingAuthAction(token);
+    } catch {
+      setTokenError("Network error — try again");
+    }
+    setAuthBusy(false);
   };
 
   // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -682,11 +737,11 @@ export default function Home() {
   const fetchOngoing = useCallback(async () => {
     setOngoingLoading(true);
     try {
-      const res = await fetch(`${WORKER_URL}/sessions/active`);
+      const res = await fetch(`${WORKER_URL}/sessions/active`, adminToken ? { headers: { Authorization: `Bearer ${adminToken}` } } : undefined);
       const data = await res.json() as { ok: boolean; sessions: OngoingSession[] };
       if (data.ok) setOngoingSessions(data.sessions || []);
     } catch { /* ignore */ } finally { setOngoingLoading(false); }
-  }, []);
+  }, [adminToken]);
 
   const doDeleteSession = useCallback(async (code: string, token: string) => {
     try {
@@ -1436,6 +1491,10 @@ export default function Home() {
             <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>
               Connect to Session
             </button>
+            <button className="cb-btn" style={{ padding: "12px 20px", fontSize: 14, fontWeight: 700, borderColor: adminToken ? "#333340" : "#7c3aed", color: adminToken ? "var(--cb-muted)" : "#a78bfa" }}
+              onClick={() => { if (adminToken) { logout(); } else { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); } }}>
+              {adminToken ? `${authKind === "master" ? "Super-admin" : authName} · Sign out` : "Sign in / Register"}
+            </button>
             {saves.length > 0 && (
               <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => setShowSavePanel(true)}>
                 Load Saved ({saves.length})
@@ -1617,19 +1676,40 @@ export default function Home() {
       {showTokenDialog && (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowTokenDialog(false); }}>
-          <div style={{ background: "#111115", border: "1px solid #333340", padding: "28px 32px", minWidth: 320, maxWidth: 400, display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: "0.2em", color: "#e8e8f0" }}>ADMIN PASSWORD</div>
-            <div style={{ fontSize: 12, color: "#888899", lineHeight: 1.5 }}>Enter the admin password to publish the bracket.</div>
-            <input type="password" autoFocus value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleTokenSubmit(); if (e.key === "Escape") setShowTokenDialog(false); }}
-              placeholder="Password"
-              style={{ background: "#0a0a0a", border: "1px solid #333340", color: "#e8e8f0", padding: "8px 12px", fontSize: 13, fontFamily: "'Saira Condensed', sans-serif", outline: "none", letterSpacing: "0.1em" }}
-            />
+          <div style={{ background: "#111115", border: "1px solid #333340", padding: "24px 28px", minWidth: 340, maxWidth: 420, display: "flex", flexDirection: "column", gap: 12, fontFamily: "'Saira Condensed', sans-serif" }}>
+            <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: "0.2em", color: "#e8e8f0" }}>SIGN IN</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {(["login", "register", "master"] as const).map((mode) => (
+                <button key={mode} className="cb-btn" style={{ flex: 1, fontSize: 11, padding: "5px 4px", borderColor: authMode === mode ? "#7c3aed" : undefined, color: authMode === mode ? "#a78bfa" : undefined }}
+                  onClick={() => { setAuthMode(mode); setTokenError(""); }}>
+                  {mode === "login" ? "Log in" : mode === "register" ? "Register" : "Admin"}
+                </button>
+              ))}
+            </div>
+            {authMode === "login" && (
+              <>
+                <input className="team-input" autoFocus placeholder="Account / org name" value={fLoginName} onChange={(e) => setFLoginName(e.target.value)} />
+                <input className="team-input" type="password" placeholder="Password" value={fLoginPass} onChange={(e) => setFLoginPass(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleTokenSubmit(); }} />
+              </>
+            )}
+            {authMode === "register" && (
+              <>
+                <div style={{ fontSize: 11, color: "#888899", lineHeight: 1.5 }}>Have an invite code? Create your organizer account.</div>
+                <input className="team-input" placeholder="Invite code (INV-…)" value={fRegInvite} onChange={(e) => setFRegInvite(e.target.value.toUpperCase())} />
+                <input className="team-input" placeholder="Account / org name" value={fRegName} onChange={(e) => setFRegName(e.target.value)} />
+                <input className="team-input" type="password" placeholder="Choose a password (6+ chars)" value={fRegPass} onChange={(e) => setFRegPass(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleTokenSubmit(); }} />
+              </>
+            )}
+            {authMode === "master" && (
+              <>
+                <div style={{ fontSize: 11, color: "#888899", lineHeight: 1.5 }}>Super-admin master password.</div>
+                <input className="team-input" type="password" autoFocus placeholder="Master password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleTokenSubmit(); if (e.key === "Escape") setShowTokenDialog(false); }} />
+              </>
+            )}
             {tokenError && <div style={{ fontSize: 11, color: "#ef4444" }}>{tokenError}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="cb-btn" onClick={() => setShowTokenDialog(false)}>Cancel</button>
-              <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={handleTokenSubmit}>Confirm</button>
+              <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} disabled={authBusy} onClick={handleTokenSubmit}>{authBusy ? "…" : "Continue"}</button>
             </div>
           </div>
         </div>
@@ -1686,6 +1766,14 @@ export default function Home() {
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>New Tournament</button>
           <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>Ongoing{ongoingSessions.length ? ` (${ongoingSessions.length})` : ""}</button>
+          {adminToken ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--cb-muted)" }}>
+              <span style={{ color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>
+              <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10 }} onClick={logout}>Sign out</button>
+            </span>
+          ) : (
+            <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in</button>
+          )}
           <button className="cb-btn"
             style={{ borderColor: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#7c3aed", color: publishStatus === "ok" ? "#22c55e" : publishStatus === "error" ? "#ef4444" : "#a78bfa", opacity: publishStatus === "publishing" ? 0.6 : 1 }}
             disabled={publishStatus === "publishing"} onClick={() => publishBracket(pods)}>
