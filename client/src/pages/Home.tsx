@@ -468,16 +468,6 @@ export default function Home() {
     }
   }, [tournamentSize, tournamentMode, seeds, formatConfig, globalFormat]);
 
-  // Quiet mirror to the public page (/bracket) — no status churn, and never signs
-  // the operator out on a transient failure (unlike the manual publish path).
-  const doPublishQuiet = useCallback(async (podsToPublish: Pod[], token: string) => {
-    try {
-      const payload = JSON.stringify({ pods: podsToPublish, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, publishedAt: new Date().toISOString() });
-      const res = await fetch(`${WORKER_URL}/bracket`, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": token }, body: JSON.stringify({ state: payload }) });
-      if (res.ok) setIsLive(true);
-    } catch { /* ignore */ }
-  }, [tournamentSize, tournamentMode, seeds, formatConfig, globalFormat]);
-
   const publishBracket = useCallback((podsToPublish: Pod[]) => {
     if (!adminToken) {
       pendingAction.current = "publish";
@@ -682,16 +672,6 @@ export default function Home() {
     connect();
     return () => { cancelled = true; closeWs(); };
   }, [sessionCode, adminToken, adoptServerState]);
-
-  // Continuously mirror the active tournament to the public page (public.html)
-  // so the link players open is always current — no manual Publish needed.
-  // Owner/admin only; co-hosts don't drive the public page.
-  useEffect(() => {
-    if (!sessionCode || !adminToken || authKind === "cohost") return;
-    if (!pods.length) return;
-    const t = setTimeout(() => { doPublishQuiet(pods, adminToken); }, 1200);
-    return () => clearTimeout(t);
-  }, [pods, sessionCode, adminToken, authKind, doPublishQuiet]);
 
   const generateSessionCode = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -1877,7 +1857,7 @@ export default function Home() {
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>Home</button>
           {adminToken && <span style={{ fontSize: 11, color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>}
-          <button className="cb-btn" style={{ borderColor: "#10b981", color: "#34d399" }} onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/public.html"); toast.success("Public link copied — it updates live for players"); }}>Public link</button>
+          <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/live.html"); toast.success("Gallery link copied — shows all live tournaments"); }}>Gallery link</button>
           <button className="cb-btn" onClick={handleCompact} style={compactMode ? { borderColor: "#9b6dff", color: "#9b6dff" } : undefined}>{compactMode ? "Normal" : "Compact"}</button>
           <button className="cb-btn" onClick={handleExportPng} style={{ borderColor: "#10b981", color: "#34d399" }}>Export PNG</button>
           <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => setShowSavePanel(true)}>...</button>
