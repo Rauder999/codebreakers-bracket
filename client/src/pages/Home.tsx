@@ -278,6 +278,10 @@ export default function Home() {
   const [ongoingSessions, setOngoingSessions] = useState<OngoingSession[]>([]);
   const [showOngoing, setShowOngoing] = useState(false);
   const [ongoingLoading, setOngoingLoading] = useState(false);
+  const [showInvites, setShowInvites] = useState(false);
+  const [invitesList, setInvitesList] = useState<{ code: string; note: string; usedBy: string | null; createdAt: string | null }[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [newInviteNote, setNewInviteNote] = useState("");
 
   // Session
   const [sessionCode, setSessionCode] = useState<string | null>(null);
@@ -743,6 +747,37 @@ export default function Home() {
     } catch { /* ignore */ } finally { setOngoingLoading(false); }
   }, [adminToken]);
 
+  // ─── Invites (super-admin) ────────────────────────────────────────────────
+  const fetchInvites = useCallback(async () => {
+    setInvitesLoading(true);
+    try {
+      const res = await fetch(`${WORKER_URL}/invites`, { headers: { Authorization: `Bearer ${adminToken}` } });
+      const d = await res.json() as { ok: boolean; invites: { code: string; note: string; usedBy: string | null; createdAt: string | null }[] };
+      if (d.ok) setInvitesList(d.invites || []);
+    } catch { /* ignore */ } finally { setInvitesLoading(false); }
+  }, [adminToken]);
+
+  const mintInvite = useCallback(async () => {
+    try {
+      const res = await fetch(`${WORKER_URL}/invites`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` }, body: JSON.stringify({ note: newInviteNote }) });
+      const d = await res.json() as { ok: boolean; code?: string; error?: string };
+      if (d.ok && d.code) { setNewInviteNote(""); navigator.clipboard.writeText(d.code); toast.success(`Invite ${d.code} created & copied`); fetchInvites(); }
+      else toast.error(d.error || "Failed to create invite");
+    } catch { toast.error("Network error"); }
+  }, [adminToken, newInviteNote, fetchInvites]);
+
+  // Generate a co-host edit link for the current session and copy it.
+  const shareSession = useCallback(async (code: string) => {
+    try {
+      const res = await fetch(`${WORKER_URL}/session/${code}/share`, { method: "POST", headers: { Authorization: `Bearer ${adminToken}` } });
+      const d = await res.json() as { ok: boolean; code?: string; token?: string; error?: string };
+      if (!d.ok || !d.token) { toast.error(d.error || "Failed to create share link"); return; }
+      const link = `https://rauder999.github.io/codebreakers-bracket/?cohost=${encodeURIComponent(d.token)}&session=${d.code}`;
+      navigator.clipboard.writeText(link);
+      toast.success("Co-host edit link copied — send it to your helper", { duration: 4000 });
+    } catch { toast.error("Network error"); }
+  }, [adminToken]);
+
   const doDeleteSession = useCallback(async (code: string, token: string) => {
     try {
       await fetch(`${WORKER_URL}/session/${code}`, { method: "DELETE", headers: { "X-Admin-Token": token } });
@@ -778,8 +813,23 @@ export default function Home() {
     sessionStorage.removeItem("cb_session_editor");
     toast("Left session", { duration: 1500 });
   }, []);
+  // Co-host link on mount: ?cohost=<token>&session=<code> grants write access to
+  // one tournament without an account. Takes precedence over auto-rejoin.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cohost = params.get("cohost");
+    const sess = params.get("session");
+    if (cohost && sess) {
+      applyAuth(cohost, "cohost", "Co-host");
+      window.history.replaceState({}, "", window.location.pathname);
+      joinByCode(sess);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Auto-rejoin session on mount if sessionStorage has a code
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("cohost")) return; // handled above
     const savedCode = sessionStorage.getItem("cb_session_code");
     if (!savedCode) return;
     const savedEditor = sessionStorage.getItem("cb_session_editor");
@@ -1715,6 +1765,33 @@ export default function Home() {
         </div>
       )}
 
+      {/* Invites modal (super-admin) */}
+      {showInvites && (
+        <div onClick={(e) => { if (e.target === e.currentTarget) setShowInvites(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
+          <div style={{ width: 520, maxWidth: "92vw", maxHeight: "72vh", background: "#0d0d12", border: "1px solid #7c3aed", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.7)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--cb-border)" }}>
+              <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Invites</span>
+              <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowInvites(false)}>X</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderBottom: "1px solid #15151c" }}>
+              <input className="team-input" placeholder="Note (e.g. org name)" value={newInviteNote} onChange={(e) => setNewInviteNote(e.target.value)} style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") mintInvite(); }} />
+              <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={mintInvite}>Generate invite</button>
+            </div>
+            <div style={{ overflow: "auto", flex: 1 }}>
+              {invitesList.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "var(--cb-muted)", fontSize: 13 }}>{invitesLoading ? "Loading..." : "No invites yet"}</div>}
+              {invitesList.map((iv) => (
+                <div key={iv.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid #15151c" }}>
+                  <span title="Click to copy" style={{ fontFamily: "monospace", fontSize: 13, color: iv.usedBy ? "var(--cb-muted)" : "#c4b5fd", letterSpacing: "0.1em", cursor: "pointer" }} onClick={() => { navigator.clipboard.writeText(iv.code); toast("Code copied"); }}>{iv.code}</span>
+                  {iv.note && <span style={{ fontSize: 11, color: "var(--cb-muted)" }}>{iv.note}</span>}
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: iv.usedBy ? "#f59e0b" : "#34d399" }}>{iv.usedBy ? `used by ${iv.usedBy}` : "unused"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Ongoing Tournaments modal */}
       {showOngoing && (
         <div onClick={(e) => { if (e.target === e.currentTarget) setShowOngoing(false); }}
@@ -1766,6 +1843,9 @@ export default function Home() {
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>New Tournament</button>
           <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>Ongoing{ongoingSessions.length ? ` (${ongoingSessions.length})` : ""}</button>
+          {authKind === "master" && (
+            <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => { setShowInvites(true); fetchInvites(); }}>Invites</button>
+          )}
           {adminToken ? (
             <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--cb-muted)" }}>
               <span style={{ color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>
@@ -1801,6 +1881,7 @@ export default function Home() {
               <span style={{ color: "#c4b5fd", fontWeight: 700 }}>{sessionCode}</span>
               {lastEditor && <span style={{ color: "var(--cb-muted)" }}>by {lastEditor}</span>}
               <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10, borderColor: "#10b981", color: "#34d399" }} onClick={() => { navigator.clipboard.writeText(`https://rauder999.github.io/codebreakers-bracket/live.html?session=${sessionCode}`); toast.success("Live link copied!"); }}>Live Link</button>
+              {authKind !== "cohost" && <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10, borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => sessionCode && shareSession(sessionCode)}>Share</button>}
               <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10, borderColor: "#555566", color: "var(--cb-muted)" }} onClick={handleLeaveSession}>Leave</button>
             </div>
           )}
