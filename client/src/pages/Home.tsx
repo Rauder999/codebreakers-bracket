@@ -1,7 +1,8 @@
 /*
- * DESIGN: Cold Steel - Industrial Precision
- * Dark terminal, 1px borders, no rounding, Saira Condensed
- * Silver + Purple signals, Green = advance, Orange = LB/drop, Gold = champion
+ * DESIGN: Terminal Violet — dark terminal, 1px borders, no rounding.
+ * Type: Space Grotesk (display) / Inter (text) / IBM Plex Mono (data).
+ * Semantics: violet = brand, green = advance, orange = drop to LB,
+ * red = LIVE, gold = champion, dimmed = eliminated. Tokens live in index.css.
  *
  * ENGINE: bracketEngine.ts - generative, per-phase format (2 or 4 teams)
  * MODES: Single Elimination / Double Elimination
@@ -10,6 +11,7 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
+import { Video, Crown, GripVertical, X } from "lucide-react";
 import html2canvas from "html2canvas";
 import {
   buildInitialPods,
@@ -69,7 +71,7 @@ function loadAutosave(): Partial<SavedTournament> | null {
 
 type Placement = 0 | 1 | 2 | 3 | 4;
 const PLACEMENT_LABELS: Record<Placement, string> = { 0: "-", 1: "1st", 2: "2nd", 3: "3rd", 4: "4th" };
-const PLACEMENT_EMOJIS: Record<Placement, string> = { 0: "", 1: "🥇", 2: "🥈", 3: "🥉", 4: "" };
+const PLACEMENT_COLORS: Record<number, string> = { 1: "var(--cb-gold)", 2: "var(--cb-silver)", 3: "var(--cb-orange)" };
 
 interface Connector {
   x1: number; y1: number;
@@ -228,28 +230,28 @@ function BracketPreview({ size, mode, opts, config }: { size: Size; mode: Tourna
     if (p.advanceTo && pos[p.advanceTo]) adv.push([p.id, p.advanceTo]);
     if (mode === "double" && p.dropTo && !p.hasNoLBDrop && pos[p.dropTo]) drop.push([p.id, p.dropTo]);
   }
-  const strokeFor = (b: string) => b === "gf" ? "#f59e0b" : b === "lb" ? "#f97316" : "#7c3aed";
+  const strokeFor = (b: string) => b === "gf" ? "#e8b64a" : b === "lb" ? "#ff8a3d" : "#7c5cff";
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: "block" }} fontFamily="'Saira Condensed', sans-serif">
-        <text x={marginX} y={topY - 12} fill="#a78bfa" fontSize={9} letterSpacing={1.5}>WINNERS BRACKET → FINALS</text>
-        {bot.length > 0 && <text x={marginX} y={botY - 12} fill="#f59e0b" fontSize={9} letterSpacing={1.5}>LOSERS BRACKET</text>}
-        {adv.map(([a, b], i) => { const s = pos[a], t = pos[b]; return <path key={"a" + i} d={`M ${s.x + s.w} ${s.cy} C ${s.x + s.w + 18} ${s.cy}, ${t.x - 18} ${t.cy}, ${t.x} ${t.cy}`} stroke="#22c55e" strokeWidth={1.2} fill="none" opacity={0.6} />; })}
-        {drop.map(([a, b], i) => { const s = pos[a], t = pos[b]; const my = (s.y + s.h + t.y) / 2; return <path key={"d" + i} d={`M ${s.cx} ${s.y + s.h} C ${s.cx} ${my}, ${t.cx} ${my}, ${t.cx} ${t.y}`} stroke="#f97316" strokeWidth={1.3} strokeDasharray="4 3" fill="none" opacity={0.85} />; })}
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: "block" }} fontFamily="'IBM Plex Mono', monospace">
+        <text x={marginX} y={topY - 12} fill="#a48fff" fontSize={8} letterSpacing={2}>WINNERS BRACKET → FINALS</text>
+        {bot.length > 0 && <text x={marginX} y={botY - 12} fill="#ff8a3d" fontSize={8} letterSpacing={2}>LOSERS BRACKET</text>}
+        {adv.map(([a, b], i) => { const s = pos[a], t = pos[b]; return <path key={"a" + i} d={`M ${s.x + s.w} ${s.cy} C ${s.x + s.w + 18} ${s.cy}, ${t.x - 18} ${t.cy}, ${t.x} ${t.cy}`} stroke="#28d17c" strokeWidth={1.2} fill="none" opacity={0.6} />; })}
+        {drop.map(([a, b], i) => { const s = pos[a], t = pos[b]; const my = (s.y + s.h + t.y) / 2; return <path key={"d" + i} d={`M ${s.cx} ${s.y + s.h} C ${s.cx} ${my}, ${t.cx} ${my}, ${t.cx} ${t.y}`} stroke="#ff8a3d" strokeWidth={1.3} strokeDasharray="4 3" fill="none" opacity={0.85} />; })}
         {graph.map((p) => { const n = pos[p.id]; if (!n) return null; const c = strokeFor(p.bracket); return (
           <g key={p.id}>
-            <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={3} fill={c + "22"} stroke={c} strokeWidth={1} />
-            <text x={n.cx} y={n.y + 13} textAnchor="middle" fill="#d8d8e8" fontSize={7}>{shortLabel(p.label)}</text>
-            <text x={n.cx} y={n.y + 25} textAnchor="middle" fill={c === "#7c3aed" ? "#c4b5fd" : c} fontSize={9} fontWeight={700}>{pcOf(p)}×{psOf(p)}</text>
+            <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={0} fill={c + "1e"} stroke={c} strokeWidth={1} />
+            <text x={n.cx} y={n.y + 13} textAnchor="middle" fill="#dfe3ef" fontSize={7}>{shortLabel(p.label)}</text>
+            <text x={n.cx} y={n.y + 25} textAnchor="middle" fill={c === "#7c5cff" ? "#a48fff" : c} fontSize={9} fontWeight={600}>{pcOf(p)}×{psOf(p)}</text>
           </g>
         ); })}
       </svg>
-      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 9, color: "#888899" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#22c55e" strokeWidth={2} /></svg>advances</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" /></svg>drops to losers</span>
+      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 9, color: "var(--cb-muted)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#28d17c" strokeWidth={2} /></svg>advances</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#ff8a3d" strokeWidth={2} strokeDasharray="4 3" /></svg>drops to losers</span>
       </div>
-      <div style={{ fontSize: 9, color: "#66667a", marginTop: 6, lineHeight: 1.4 }}>Teams fill in after you generate.</div>
+      <div style={{ fontSize: 9, color: "var(--cb-muted)", opacity: 0.75, marginTop: 6, lineHeight: 1.4 }}>Teams fill in after you generate.</div>
     </div>
   );
 }
@@ -1057,7 +1059,7 @@ export default function Home() {
     if (!el) { toast.error("Bracket not found"); return; }
     toast("Generating PNG...");
     try {
-      const canvas = await html2canvas(el, { backgroundColor: "#0a0a0a", scale: 2, useCORS: true, logging: false });
+      const canvas = await html2canvas(el, { backgroundColor: "#08090c", scale: 2, useCORS: true, logging: false });
       const link = document.createElement("a");
       link.download = "codebreakers-bracket.png";
       link.href = canvas.toDataURL("image/png");
@@ -1343,250 +1345,258 @@ export default function Home() {
       {screen === "setup" && (
         <div className="setup-screen">
           {/* Top-right account / invites / back-to-tournament cluster */}
-          <div style={{ position: "fixed", top: 12, right: 16, zIndex: 600, display: "flex", gap: 8, alignItems: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
-            <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/live.html"); toast.success("Gallery link copied — shows all live tournaments"); }}>Gallery link</button>
+          <div style={{ position: "fixed", top: 12, right: 16, zIndex: 600, display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="cb-btn ghost" onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/live.html"); toast.success("Gallery link copied — shows all live tournaments"); }}>Gallery link</button>
             {pods.length > 0 && (
-              <button className="cb-btn" style={{ borderColor: "#22c55e", color: "#4ade80" }} onClick={() => setScreen("bracket")}>← Back to tournament</button>
+              <button className="cb-btn success" onClick={() => setScreen("bracket")}>← Back to tournament</button>
             )}
             {authKind === "master" && (
-              <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => { setShowInvites(true); fetchInvites(); }}>Invites</button>
+              <button className="cb-btn warn" onClick={() => { setShowInvites(true); fetchInvites(); }}>Invites</button>
             )}
             {adminToken ? (
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--cb-muted)" }}>
-                <span style={{ color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>
-                <button className="cb-btn" style={{ padding: "3px 8px", fontSize: 11 }} onClick={logout}>Sign out</button>
+                <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 11, letterSpacing: "0.08em", color: "var(--cb-purple2)" }}>{authKind === "master" ? "SUPER-ADMIN" : (authName || "Signed in")}</span>
+                <button className="cb-btn" style={{ padding: "3px 8px", fontSize: 10.5 }} onClick={logout}>Sign out</button>
               </span>
             ) : (
-              <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in / Register</button>
+              <button className="cb-btn info" onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in / Register</button>
             )}
           </div>
           {/* Live bracket preview — wide screens only, updates as you change format */}
           {previewWide && (
-            <div style={{ position: "fixed", top: 76, right: 24, width: 400, maxHeight: "82vh", overflowY: "auto", zIndex: 500, background: "rgba(13,13,18,0.96)", border: "1px solid #2a2a38", borderRadius: 4, padding: "16px 18px", fontFamily: "'Saira Condensed', sans-serif" }}>
-              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Live Preview</div>
-              <div style={{ fontSize: 10, color: "#888899", margin: "4px 0 10px" }}>{tournamentSize} teams · {tournamentMode === "double" ? "Double Elimination" : "Single Elimination"}</div>
+            <div style={{ position: "fixed", top: 76, right: 24, width: 400, maxHeight: "78vh", overflowY: "auto", zIndex: 500, background: "rgba(13,15,20,0.96)", border: "1px solid var(--cb-border2)", padding: "16px 18px" }}>
+              <div style={{ fontFamily: "var(--cb-font-display)", fontSize: 12, fontWeight: 600, letterSpacing: "0.2em", color: "var(--cb-purple2)", textTransform: "uppercase" }}>Live Preview</div>
+              <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, color: "var(--cb-muted)", margin: "4px 0 10px" }}>{tournamentSize} teams · {tournamentMode === "double" ? "Double Elimination" : "Single Elimination"}</div>
               <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
             </div>
           )}
-          {/* Mode selector */}
-          <div className="setup-title">Tournament Mode</div>
-          <div className="mode-selector">
-            <button className={`mode-btn${tournamentMode === "single" ? " active" : ""}`} onClick={() => setTournamentMode("single")}>
-              <span className="mode-btn-title">SINGLE ELIMINATION</span>
-              <span className="mode-btn-desc">3rd/4th = eliminated immediately</span>
-            </button>
-            <button className={`mode-btn${tournamentMode === "double" ? " active de" : ""}`} onClick={() => setTournamentMode("double")}>
-              <span className="mode-btn-title">DOUBLE ELIMINATION</span>
-              <span className="mode-btn-desc">3rd/4th drop to Losers Bracket · 2 chances</span>
-            </button>
+
+          {/* STEP 01 — Mode */}
+          <div className="setup-step">
+            <div className="step-head"><span className="step-num">01</span><span className="step-title">Mode</span></div>
+            <div className="mode-selector">
+              <button className={`mode-btn${tournamentMode === "single" ? " active" : ""}`} onClick={() => setTournamentMode("single")}>
+                <span className="mode-btn-title">Single Elimination</span>
+                <span className="mode-btn-desc">Lose once — you're out. Fast format.</span>
+              </button>
+              <button className={`mode-btn${tournamentMode === "double" ? " active de" : ""}`} onClick={() => setTournamentMode("double")}>
+                <span className="mode-btn-title">Double Elimination</span>
+                <span className="mode-btn-desc">3rd/4th drop to Losers Bracket · 2 chances</span>
+              </button>
+            </div>
           </div>
 
-          {/* Size selector */}
-          <div className="setup-title" style={{ marginTop: "28px" }}>Tournament Size</div>
-          <div className="size-selector">
-            {([8, 16, 32] as const).map((s) => (
-              <button key={s} className={`size-btn${tournamentSize === s ? " active" : ""}`} onClick={() => handleSizeChange(s)}>{s}</button>
-            ))}
+          {/* STEP 02 — Size */}
+          <div className="setup-step">
+            <div className="step-head"><span className="step-num">02</span><span className="step-title">Size</span><span className="step-hint">teams in the bracket</span></div>
+            <div className="size-selector">
+              {([8, 16, 32] as const).map((s) => (
+                <button key={s} className={`size-btn${tournamentSize === s ? " active" : ""}`} onClick={() => handleSizeChange(s)}>{s}</button>
+              ))}
+            </div>
           </div>
 
-          {/* Match Format panel */}
-          <div className="setup-title" style={{ marginTop: "28px" }}>Match Format</div>
-          <div className="format-panel">
-            <div className="format-global-row">
-              <span className="format-label">GLOBAL DEFAULT</span>
-              <div className="format-toggle-group">
-                <button
-                  className={`format-toggle-btn${globalFormat === 4 ? " active" : ""}`}
-                  onClick={() => setGlobalFormat(4)}
-                >4-TEAM CASH-OUT</button>
-                <button
-                  className={`format-toggle-btn${globalFormat === 2 ? " active" : ""}`}
-                  onClick={() => setGlobalFormat(2)}
-                >2-TEAM FINAL ROUND</button>
+          {/* STEP 03 — Match format (advanced: per-phase overrides + finals structure) */}
+          <div className="setup-step">
+            <div className="step-head"><span className="step-num">03</span><span className="step-title">Match Format</span></div>
+            <div className="format-panel">
+              <div className="format-global-row">
+                <span className="format-label">GLOBAL DEFAULT</span>
+                <div className="format-toggle-group">
+                  <button
+                    className={`format-toggle-btn${globalFormat === 4 ? " active" : ""}`}
+                    onClick={() => setGlobalFormat(4)}
+                  >4-TEAM CASH-OUT</button>
+                  <button
+                    className={`format-toggle-btn${globalFormat === 2 ? " active" : ""}`}
+                    onClick={() => setGlobalFormat(2)}
+                  >2-TEAM FINAL ROUND</button>
+                </div>
               </div>
             </div>
-
-            {/* Per-phase overrides - grouped for DE */}
-            {isDE ? (
-              <>
-                {wbGraphPhases.length > 0 && (
+            <details className="adv">
+              <summary>Advanced — per-phase overrides · finals: {finalsBracket ? "head-to-head semis" : "direct to grand final"}</summary>
+              <div className="adv-inner">
+                {/* Per-phase overrides - grouped for DE */}
+                {isDE ? (
+                  <>
+                    {wbGraphPhases.length > 0 && (
+                      <div className="format-section">
+                        <div className="format-section-label">WINNERS BRACKET</div>
+                        {wbGraphPhases.map(ph => (
+                          <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
+                        ))}
+                      </div>
+                    )}
+                    {lbGraphPhases.length > 0 && (
+                      <div className="format-section">
+                        <div className="format-section-label">LOSERS BRACKET</div>
+                        {lbGraphPhases.map(ph => (
+                          <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
+                        ))}
+                      </div>
+                    )}
+                    {gfGraphPhases.length > 0 && (
+                      <div className="format-section">
+                        <div className="format-section-label">FINALS</div>
+                        {gfGraphPhases.map(ph => (
+                          <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
                   <div className="format-section">
-                    <div className="format-section-label">WINNERS BRACKET</div>
-                    {wbGraphPhases.map(ph => (
+                    {graph.filter(p => p.id !== "gf").map(ph => (
                       <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
                     ))}
                   </div>
                 )}
-                {lbGraphPhases.length > 0 && (
-                  <div className="format-section">
-                    <div className="format-section-label">LOSERS BRACKET</div>
-                    {lbGraphPhases.map(ph => (
-                      <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
-                    ))}
+
+                {/* Finals structure */}
+                <div className="format-global-row" style={{ paddingTop: 10, borderTop: "1px solid var(--cb-border)" }}>
+                  <span className="format-label">FINALS STRUCTURE</span>
+                  <div className="format-toggle-group">
+                    <button
+                      className={`format-toggle-btn${!finalsBracket ? " active" : ""}`}
+                      onClick={() => setFinalsBracket(false)}
+                    >DIRECT TO GRAND FINAL</button>
+                    <button
+                      className={`format-toggle-btn${finalsBracket ? " active" : ""}`}
+                      onClick={() => setFinalsBracket(true)}
+                    >HEAD-TO-HEAD SEMIS</button>
                   </div>
-                )}
-                {gfGraphPhases.length > 0 && (
-                  <div className="format-section">
-                    <div className="format-section-label">FINALS</div>
-                    {gfGraphPhases.map(ph => (
-                      <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="format-section">
-                {graph.filter(p => p.id !== "gf").map(ph => (
-                  <FormatPhaseRow key={ph.id} phase={ph} formatConfig={formatConfig} globalFormat={globalFormat} setFormatConfig={setFormatConfig} />
-                ))}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.02em", padding: "0 4px", lineHeight: 1.5 }}>
+                  {finalsBracket
+                    ? "Cash-Out Final (4 teams) splits into two 1v1 games: 1st vs 4th and 2nd vs 3rd. Each winner advances to the Grand Final."
+                    : "Cash-Out Final (4 teams) sends its top 2 straight to the Grand Final."}
+                </div>
+                <div className="format-locked-row">
+                  <span className="format-label" style={{ color: "var(--cb-muted)" }}>GRAND FINAL</span>
+                  <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10.5, color: "var(--cb-muted)", letterSpacing: "0.05em" }}>2-TEAM (locked)</span>
+                </div>
               </div>
-            )}
-            <div className="format-locked-row">
-              <span className="format-label" style={{ color: "var(--cb-muted)" }}>GRAND FINAL</span>
-              <span style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em" }}>2-TEAM (locked)</span>
-            </div>
+            </details>
           </div>
 
-          {/* Finals format */}
-          <div className="setup-title" style={{ marginTop: "28px" }}>Finals Format</div>
-          <div className="format-panel">
-            <div className="format-global-row">
-              <span className="format-label">FINALS STRUCTURE</span>
-              <div className="format-toggle-group">
-                <button
-                  className={`format-toggle-btn${!finalsBracket ? " active" : ""}`}
-                  onClick={() => setFinalsBracket(false)}
-                >DIRECT TO GRAND FINAL</button>
-                <button
-                  className={`format-toggle-btn${finalsBracket ? " active" : ""}`}
-                  onClick={() => setFinalsBracket(true)}
-                >HEAD-TO-HEAD SEMIS</button>
-              </div>
+          {/* STEP 04 — Teams & seeds (advanced: CSV import) */}
+          <div className="setup-step">
+            <div className="step-head">
+              <span className="step-num">04</span><span className="step-title">Teams &amp; Seeds</span>
+              <span className="step-hint">drag to reorder · Seed 1 = strongest</span>
             </div>
-            <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.04em", padding: "8px 4px 2px", lineHeight: 1.5 }}>
-              {finalsBracket
-                ? "Cash-Out Final (4 teams) splits into two 1v1 games: 1st vs 4th and 2nd vs 3rd. Each winner advances to the Grand Final."
-                : "Cash-Out Final (4 teams) sends its top 2 straight to the Grand Final."}
+            <div className="seeds-list">
+              {seeds.map((entry, i) => (
+                <div key={i} className="seed-row" draggable onDragStart={() => handleDragStart(i)} onDragOver={(e) => handleDragOver(e, i)} onDrop={handleDrop}>
+                  <span className="seed-drag-handle"><GripVertical size={14} /></span>
+                  <span className="seed-number">#{entry.seed}</span>
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <input className="team-input" type="text" value={entry.name} placeholder={`Team ${i + 1}`} onChange={(e) => handleNameChange(i, e.target.value)} maxLength={24} />
+                    <input
+                      className="team-input players-input"
+                      type="text"
+                      value={(entry.players ?? []).join(", ")}
+                      placeholder="Players: Player1, Player2, Player3..."
+                      onChange={(e) => {
+                        const players = e.target.value.split(",").map((p) => p.trim()).filter(Boolean);
+                        setSeeds((prev) => prev.map((s, si) => si === i ? { ...s, players } : s));
+                      }}
+                      style={{ opacity: 0.75 }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-
-          {/* CSV Import panel */}
-          <div className="setup-title" style={{ marginTop: "28px" }}>
-            <span>Import Teams</span>
-            <button className="cb-btn" style={{ marginLeft: 12, padding: "4px 12px", fontSize: 11 }} onClick={() => setShowCsvPanel(!showCsvPanel)}>
-              {showCsvPanel ? "Hide" : "Show"}
-            </button>
-          </div>
-          {showCsvPanel && (
-            <div className="csv-panel">
-              <div className="csv-row">
-                <input
-                  className="team-input"
-                  type="text"
-                  value={csvUrl}
-                  onChange={(e) => setCsvUrl(e.target.value)}
-                  placeholder="Published Google Sheet CSV URL..."
-                  style={{ flex: 1 }}
-                />
-                <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee" }} onClick={handleCsvFetch} disabled={csvLoading}>
-                  {csvLoading ? "Loading..." : "Fetch"}
-                </button>
-              </div>
-              <div className="csv-row" style={{ gap: 8 }}>
-                <input ref={csvFileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleCsvFile} />
-                <button className="cb-btn" style={{ fontSize: 11 }} onClick={() => csvFileRef.current?.click()}>
-                  Upload .csv file
-                </button>
-              </div>
-
-              {csvRows && (
-                <div className="csv-mapping">
-                  <div className="csv-mapping-title">Column Mapping ({csvRows.length - 1} rows)</div>
-                  <div className="csv-mapping-row">
-                    <span className="csv-mapping-label">Team Name</span>
-                    <select className="csv-select" value={csvNameCol} onChange={e => setCsvNameCol(Number(e.target.value))}>
-                      {csvRows[0].map((h, i) => <option key={i} value={i}>{h || `Col ${i}`}</option>)}
-                    </select>
-                  </div>
-                  <div className="csv-mapping-row">
-                    <span className="csv-mapping-label">Strength</span>
-                    <select className="csv-select" value={csvStrengthCol} onChange={e => setCsvStrengthCol(Number(e.target.value))}>
-                      {csvRows[0].map((h, i) => <option key={i} value={i}>{h || `Col ${i}`}</option>)}
-                    </select>
-                  </div>
-                  <div className="csv-mapping-row" style={{ alignItems: "flex-start" }}>
-                    <span className="csv-mapping-label" style={{ paddingTop: 4 }}>Player Embark IDs</span>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {csvRows[0].map((h, i) => (
-                        <label key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--cb-muted)", cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            checked={csvPlayerCols.includes(i)}
-                            onChange={e => {
-                              setCsvPlayerCols(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i));
-                            }}
-                            style={{ accentColor: "#7c3aed" }}
-                          />
-                          {h || `Col ${i}`}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <button className="cb-btn generate" style={{ marginTop: 8 }} onClick={handleCsvApply}>
-                    Apply Import
+            <details className="adv" open={showCsvPanel} onToggle={(e) => setShowCsvPanel((e.target as HTMLDetailsElement).open)}>
+              <summary>Import teams — CSV / Google Sheets</summary>
+              <div className="adv-inner">
+                <div className="csv-row">
+                  <input
+                    className="team-input"
+                    type="text"
+                    value={csvUrl}
+                    onChange={(e) => setCsvUrl(e.target.value)}
+                    placeholder="Published Google Sheet CSV URL..."
+                    style={{ flex: 1 }}
+                  />
+                  <button className="cb-btn info" onClick={handleCsvFetch} disabled={csvLoading}>
+                    {csvLoading ? "Loading..." : "Fetch"}
                   </button>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Seeding panel */}
-          <div className="setup-section-header" style={{ marginTop: "28px" }}>
-            <span className="setup-title" style={{ marginBottom: 0 }}>Seeds &amp; Team Names</span>
-          </div>
-          <div className="setup-hint">Drag rows to reorder · Seed 1 = strongest</div>
-
-          <div className="seeds-list">
-            {seeds.map((entry, i) => (
-              <div key={i} className="seed-row" draggable onDragStart={() => handleDragStart(i)} onDragOver={(e) => handleDragOver(e, i)} onDrop={handleDrop}>
-                <span className="seed-drag-handle">⠿</span>
-                <span className="seed-number">#{entry.seed}</span>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <input className="team-input" type="text" value={entry.name} placeholder={`Team ${i + 1}`} onChange={(e) => handleNameChange(i, e.target.value)} maxLength={24} />
-                  <input
-                    className="team-input players-input"
-                    type="text"
-                    value={(entry.players ?? []).join(", ")}
-                    placeholder="Players: Player1, Player2, Player3..."
-                    onChange={(e) => {
-                      const players = e.target.value.split(",").map((p) => p.trim()).filter(Boolean);
-                      setSeeds((prev) => prev.map((s, si) => si === i ? { ...s, players } : s));
-                    }}
-                    style={{ fontSize: 11, opacity: 0.7 }}
-                  />
+                <div className="csv-row" style={{ gap: 8 }}>
+                  <input ref={csvFileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleCsvFile} />
+                  <button className="cb-btn" style={{ fontSize: 11 }} onClick={() => csvFileRef.current?.click()}>
+                    Upload .csv file
+                  </button>
                 </div>
+
+                {csvRows && (
+                  <div className="csv-mapping">
+                    <div className="csv-mapping-title">Column Mapping ({csvRows.length - 1} rows)</div>
+                    <div className="csv-mapping-row">
+                      <span className="csv-mapping-label">Team Name</span>
+                      <select className="csv-select" value={csvNameCol} onChange={e => setCsvNameCol(Number(e.target.value))}>
+                        {csvRows[0].map((h, i) => <option key={i} value={i}>{h || `Col ${i}`}</option>)}
+                      </select>
+                    </div>
+                    <div className="csv-mapping-row">
+                      <span className="csv-mapping-label">Strength</span>
+                      <select className="csv-select" value={csvStrengthCol} onChange={e => setCsvStrengthCol(Number(e.target.value))}>
+                        {csvRows[0].map((h, i) => <option key={i} value={i}>{h || `Col ${i}`}</option>)}
+                      </select>
+                    </div>
+                    <div className="csv-mapping-row" style={{ alignItems: "flex-start" }}>
+                      <span className="csv-mapping-label" style={{ paddingTop: 4 }}>Player Embark IDs</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {csvRows[0].map((h, i) => (
+                          <label key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--cb-muted)", cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={csvPlayerCols.includes(i)}
+                              onChange={e => {
+                                setCsvPlayerCols(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i));
+                              }}
+                              style={{ accentColor: "var(--cb-purple)" }}
+                            />
+                            {h || `Col ${i}`}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button className="cb-btn generate" style={{ marginTop: 8 }} onClick={handleCsvApply}>
+                      Apply Import
+                    </button>
+                  </div>
+                )}
               </div>
-            ))}
+            </details>
           </div>
 
-          {/* Tournament details — name is shown to spectators, your name to co-editors */}
-          <div className="setup-title" style={{ marginTop: "28px" }}>Tournament Details</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
-            <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em" }}>Tournament name (shown to spectators)</div>
-            <input className="team-input" type="text" value={tournamentName} onChange={(e) => { setTournamentName(e.target.value); sessionStorage.setItem("cb_session_name", e.target.value); }} placeholder="e.g. CODE Big League..." />
-            <div style={{ fontSize: 11, color: "var(--cb-muted)", letterSpacing: "0.05em", marginTop: 4 }}>Your name (shown to co-editors)</div>
-            <input className="team-input" type="text" value={editorName} onChange={(e) => { setEditorName(e.target.value); localStorage.setItem("cb_editor", e.target.value); }} placeholder="Your name..." />
+          {/* STEP 05 — Details: name is shown to spectators, your name to co-editors */}
+          <div className="setup-step">
+            <div className="step-head"><span className="step-num">05</span><span className="step-title">Details</span></div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 380 }}>
+              <div style={{ fontSize: 11.5, color: "var(--cb-muted)" }}>Tournament name (shown to spectators)</div>
+              <input className="team-input" type="text" value={tournamentName} onChange={(e) => { setTournamentName(e.target.value); sessionStorage.setItem("cb_session_name", e.target.value); }} placeholder="e.g. CODE Big League..." />
+              <div style={{ fontSize: 11.5, color: "var(--cb-muted)", marginTop: 4 }}>Your name (shown to co-editors)</div>
+              <input className="team-input" type="text" value={editorName} onChange={(e) => { setEditorName(e.target.value); localStorage.setItem("cb_editor", e.target.value); }} placeholder="Your name..." />
+            </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 0 }}>
-            <button className="cb-btn generate" style={{ flex: 1 }} onClick={handleGenerate}>
-              Generate Bracket
+          {/* Sticky footer: summary + primary CTA */}
+          <div className="setup-footer">
+            <span className="setup-footer-meta">
+              {tournamentSize} TEAMS · {tournamentMode === "double" ? "DOUBLE ELIM" : "SINGLE ELIM"} · {globalFormat === 4 ? "CASH-OUT" : "FINAL ROUND"} · <b>READY</b>
+            </span>
+            <button className="cb-btn generate" style={{ width: "auto", margin: 0, padding: "12px 34px" }} onClick={handleGenerate}>
+              Generate Bracket →
             </button>
-            <button className="cb-btn" style={{ borderColor: "#06b6d4", color: "#22d3ee", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => { setShowOngoing(true); fetchOngoing(); }}>
+            <button className="cb-btn info" onClick={() => { setShowOngoing(true); fetchOngoing(); }}>
               Connect to Session
             </button>
             {saves.length > 0 && (
-              <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24", padding: "12px 20px", fontSize: 14, fontWeight: 700 }} onClick={() => setShowSavePanel(true)}>
+              <button className="cb-btn warn" onClick={() => setShowSavePanel(true)}>
                 Load Saved ({saves.length})
               </button>
             )}
@@ -1600,7 +1610,7 @@ export default function Home() {
           {/* Connector SVG */}
           <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0, overflow: "visible" }}>
             {connectors.map((c) => {
-              const color = c.isDrop ? (c.active ? "#f97316" : "#2a1808") : (c.active ? "#22c55e" : "#1e1e28");
+              const color = c.isDrop ? (c.active ? "#ff8a3d" : "#2b1c10") : (c.active ? "#28d17c" : "#20242f");
               const strokeWidth = c.active ? 1.6 : 1;
               const dashArray = c.isDrop ? "4,5" : undefined;
               // Orthogonal route: out from source -> vertical in a dedicated channel -> into dest.
@@ -1717,18 +1727,17 @@ export default function Home() {
           <div
             style={{
               position: "absolute", top: 0, right: 0, bottom: 0, width: 320,
-              background: "#0a0a0a", borderLeft: "1px solid var(--cb-border)",
+              background: "var(--cb-bg)", borderLeft: "1px solid var(--cb-border2)",
               display: "flex", flexDirection: "column",
-              fontFamily: "'Saira Condensed', sans-serif",
               boxShadow: "-4px 0 24px rgba(0,0,0,0.7)",
               transform: "translateX(0)",
-              transition: "transform 0.2s cubic-bezier(0.23,1,0.32,1)",
+              transition: "transform 0.2s cubic-bezier(0.2,0.8,0.2,1)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--cb-border)" }}>
-              <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: "0.2em", color: "#b8b8cc", textTransform: "uppercase" }}>Select Map</span>
-              <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setMapPickerPod(null)}>X</button>
+              <span style={{ fontFamily: "var(--cb-font-display)", fontSize: 13, fontWeight: 700, letterSpacing: "0.18em", color: "var(--cb-silver)", textTransform: "uppercase" }}>Select Map</span>
+              <button className="cb-btn ghost" style={{ padding: "4px 8px" }} onClick={() => setMapPickerPod(null)}><X size={14} /></button>
             </div>
             <div style={{ flex: 1, overflow: "auto" }}>
               {MAP_NAMES.map((mapName) => {
@@ -1742,18 +1751,18 @@ export default function Home() {
                       padding: "12px 20px",
                       borderBottom: "1px solid var(--cb-border)",
                       cursor: "pointer",
-                      background: isSelected ? "rgba(155,109,255,0.12)" : "transparent",
-                      borderLeft: isSelected ? "2px solid #9b6dff" : "2px solid transparent",
+                      background: isSelected ? "rgba(124,92,255,0.12)" : "transparent",
+                      borderLeft: isSelected ? "2px solid var(--cb-purple)" : "2px solid transparent",
                       display: "flex", alignItems: "center", gap: 10,
                       transition: "background 0.1s",
                     }}
                     onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
                     onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                   >
-                    <span style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500, color: isSelected ? "#c4b5fd" : "#b8b8cc", letterSpacing: "0.05em" }}>
+                    <span style={{ fontFamily: "var(--cb-font-display)", fontSize: 13, fontWeight: isSelected ? 700 : 500, color: isSelected ? "var(--cb-purple2)" : "var(--cb-silver)", letterSpacing: "0.05em" }}>
                       {mapName}
                     </span>
-                    {isSelected && <span style={{ fontSize: 10, color: "#9b6dff", marginLeft: "auto" }}>SELECTED</span>}
+                    {isSelected && <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9, letterSpacing: "0.15em", color: "var(--cb-purple)", marginLeft: "auto" }}>SELECTED</span>}
                   </div>
                 );
               })}
@@ -1764,13 +1773,13 @@ export default function Home() {
 
       {/* Admin Token Dialog */}
       {showTokenDialog && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center" }}
+        <div className="cb-modal-backdrop" style={{ zIndex: 10000 }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowTokenDialog(false); }}>
-          <div style={{ background: "#111115", border: "1px solid #333340", padding: "24px 28px", minWidth: 340, maxWidth: 420, display: "flex", flexDirection: "column", gap: 12, fontFamily: "'Saira Condensed', sans-serif" }}>
-            <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: "0.2em", color: "#e8e8f0" }}>SIGN IN</div>
+          <div className="cb-modal" style={{ padding: "24px 28px", minWidth: 340, maxWidth: 420, gap: 12 }}>
+            <div className="cb-modal-title">Sign in</div>
             <div style={{ display: "flex", gap: 6 }}>
               {(["login", "register", "master"] as const).map((mode) => (
-                <button key={mode} className="cb-btn" style={{ flex: 1, fontSize: 11, padding: "5px 4px", borderColor: authMode === mode ? "#7c3aed" : undefined, color: authMode === mode ? "#a78bfa" : undefined }}
+                <button key={mode} className={`cb-btn${authMode === mode ? " accent" : ""}`} style={{ flex: 1, fontSize: 11, padding: "5px 4px" }}
                   onClick={() => { setAuthMode(mode); setTokenError(""); }}>
                   {mode === "login" ? "Log in" : mode === "register" ? "Register" : "Admin"}
                 </button>
@@ -1784,7 +1793,7 @@ export default function Home() {
             )}
             {authMode === "register" && (
               <>
-                <div style={{ fontSize: 11, color: "#888899", lineHeight: 1.5 }}>Have an invite code? Create your organizer account.</div>
+                <div style={{ fontSize: 11.5, color: "var(--cb-muted)", lineHeight: 1.5 }}>Have an invite code? Create your organizer account.</div>
                 <input className="team-input" placeholder="Invite code (INV-…)" value={fRegInvite} onChange={(e) => setFRegInvite(e.target.value.toUpperCase())} />
                 <input className="team-input" placeholder="Account / org name" value={fRegName} onChange={(e) => setFRegName(e.target.value)} />
                 <input className="team-input" type="password" placeholder="Choose a password (6+ chars)" value={fRegPass} onChange={(e) => setFRegPass(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleTokenSubmit(); }} />
@@ -1792,14 +1801,14 @@ export default function Home() {
             )}
             {authMode === "master" && (
               <>
-                <div style={{ fontSize: 11, color: "#888899", lineHeight: 1.5 }}>Super-admin master password.</div>
+                <div style={{ fontSize: 11.5, color: "var(--cb-muted)", lineHeight: 1.5 }}>Super-admin master password.</div>
                 <input className="team-input" type="password" autoFocus placeholder="Master password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleTokenSubmit(); if (e.key === "Escape") setShowTokenDialog(false); }} />
               </>
             )}
-            {tokenError && <div style={{ fontSize: 11, color: "#ef4444" }}>{tokenError}</div>}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="cb-btn" onClick={() => setShowTokenDialog(false)}>Cancel</button>
-              <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} disabled={authBusy} onClick={handleTokenSubmit}>{authBusy ? "…" : "Continue"}</button>
+            {tokenError && <div style={{ fontSize: 11.5, color: "var(--cb-red)" }}>{tokenError}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button className="cb-btn ghost" onClick={() => setShowTokenDialog(false)}>Cancel</button>
+              <button className="cb-btn primary" disabled={authBusy} onClick={handleTokenSubmit}>{authBusy ? "…" : "Continue"}</button>
             </div>
           </div>
         </div>
@@ -1807,24 +1816,23 @@ export default function Home() {
 
       {/* Invites modal (super-admin) */}
       {showInvites && (
-        <div onClick={(e) => { if (e.target === e.currentTarget) setShowInvites(false); }}
-          style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
-          <div style={{ width: 520, maxWidth: "92vw", maxHeight: "72vh", background: "#0d0d12", border: "1px solid #7c3aed", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.7)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--cb-border)" }}>
-              <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Invites</span>
-              <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowInvites(false)}>X</button>
+        <div className="cb-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setShowInvites(false); }}>
+          <div className="cb-modal" style={{ width: 520, maxWidth: "92vw", maxHeight: "72vh" }}>
+            <div className="cb-modal-head">
+              <span className="cb-modal-title">Invites</span>
+              <button className="cb-btn ghost" style={{ padding: "4px 8px" }} onClick={() => setShowInvites(false)}><X size={14} /></button>
             </div>
-            <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderBottom: "1px solid #15151c" }}>
+            <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderBottom: "1px solid var(--cb-border)" }}>
               <input className="team-input" placeholder="Note (e.g. org name)" value={newInviteNote} onChange={(e) => setNewInviteNote(e.target.value)} style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") mintInvite(); }} />
-              <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa" }} onClick={mintInvite}>Generate invite</button>
+              <button className="cb-btn accent" onClick={mintInvite}>Generate invite</button>
             </div>
             <div style={{ overflow: "auto", flex: 1 }}>
               {invitesList.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "var(--cb-muted)", fontSize: 13 }}>{invitesLoading ? "Loading..." : "No invites yet"}</div>}
               {invitesList.map((iv) => (
-                <div key={iv.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid #15151c" }}>
-                  <span title="Click to copy" style={{ fontFamily: "monospace", fontSize: 13, color: iv.usedBy ? "var(--cb-muted)" : "#c4b5fd", letterSpacing: "0.1em", cursor: "pointer" }} onClick={() => { navigator.clipboard.writeText(iv.code); toast("Code copied"); }}>{iv.code}</span>
+                <div key={iv.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid var(--cb-border)" }}>
+                  <span title="Click to copy" style={{ fontFamily: "var(--cb-font-mono)", fontSize: 12.5, color: iv.usedBy ? "var(--cb-muted)" : "var(--cb-purple2)", letterSpacing: "0.1em", cursor: "pointer" }} onClick={() => { navigator.clipboard.writeText(iv.code); toast("Code copied"); }}>{iv.code}</span>
                   {iv.note && <span style={{ fontSize: 11, color: "var(--cb-muted)" }}>{iv.note}</span>}
-                  <span style={{ marginLeft: "auto", fontSize: 11, color: iv.usedBy ? "#f59e0b" : "#34d399" }}>{iv.usedBy ? `used by ${iv.usedBy}` : "unused"}</span>
+                  <span style={{ marginLeft: "auto", fontFamily: "var(--cb-font-mono)", fontSize: 10.5, color: iv.usedBy ? "var(--cb-gold)" : "var(--cb-green)" }}>{iv.usedBy ? `used by ${iv.usedBy}` : "unused"}</span>
                 </div>
               ))}
             </div>
@@ -1834,14 +1842,13 @@ export default function Home() {
 
       {/* Ongoing Tournaments modal */}
       {showOngoing && (
-        <div onClick={(e) => { if (e.target === e.currentTarget) setShowOngoing(false); }}
-          style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Saira Condensed', sans-serif" }}>
-          <div style={{ width: 540, maxWidth: "92vw", maxHeight: "72vh", background: "#0d0d12", border: "1px solid #7c3aed", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.7)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid var(--cb-border)" }}>
-              <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.15em", color: "#a78bfa", textTransform: "uppercase" }}>Ongoing Tournaments</span>
+        <div className="cb-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setShowOngoing(false); }}>
+          <div className="cb-modal" style={{ width: 540, maxWidth: "92vw", maxHeight: "72vh" }}>
+            <div className="cb-modal-head">
+              <span className="cb-modal-title">Ongoing Tournaments</span>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={fetchOngoing} disabled={ongoingLoading}>{ongoingLoading ? "..." : "Refresh"}</button>
-                <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowOngoing(false)}>X</button>
+                <button className="cb-btn ghost" style={{ padding: "4px 8px" }} onClick={() => setShowOngoing(false)}><X size={14} /></button>
               </div>
             </div>
             <div style={{ overflow: "auto", flex: 1 }}>
@@ -1849,19 +1856,19 @@ export default function Home() {
                 <div style={{ padding: 24, textAlign: "center", color: "var(--cb-muted)", fontSize: 13 }}>{ongoingLoading ? "Loading..." : "No active tournaments"}</div>
               )}
               {ongoingSessions.map((s) => (
-                <div key={s.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: "1px solid #15151c", background: s.code === sessionCode ? "rgba(124,58,237,0.12)" : undefined }}>
+                <div key={s.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--cb-border)", background: s.code === sessionCode ? "rgba(124,92,255,0.10)" : undefined }}>
                   <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => joinByCode(s.code)}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || "Untitled"}</span>
-                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c4b5fd", letterSpacing: "0.1em" }}>{s.code}</span>
-                      {s.code === sessionCode && <span style={{ fontSize: 9, color: "#34d399", border: "1px solid #10b981", padding: "1px 5px" }}>CURRENT</span>}
+                      <span style={{ fontFamily: "var(--cb-font-display)", fontSize: 14, fontWeight: 700, color: "var(--cb-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || "Untitled"}</span>
+                      <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 11, color: "var(--cb-cyan)", letterSpacing: "0.1em" }}>{s.code}</span>
+                      {s.code === sessionCode && <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9, color: "var(--cb-green)", border: "1px solid rgba(40,209,124,0.5)", padding: "1px 5px", letterSpacing: "0.1em" }}>CURRENT</span>}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--cb-muted)", marginTop: 2 }}>
                       {[s.size ? `${s.size} teams` : null, s.mode ? (s.mode === "double" ? "Double Elim" : "Single Elim") : null, s.host || null, s.updatedAt ? timeAgo(s.updatedAt) : null].filter(Boolean).join(" · ")}
                     </div>
                   </div>
-                  <button className="cb-btn" style={{ padding: "3px 10px", fontSize: 11, borderColor: "#06b6d4", color: "#22d3ee" }} onClick={() => joinByCode(s.code)}>Open</button>
-                  <button className="cb-btn" style={{ padding: "3px 9px", fontSize: 14, lineHeight: 1, borderColor: "#ef4444", color: "#f87171" }} title="Delete tournament" onClick={() => requestDeleteSession(s.code)}>×</button>
+                  <button className="cb-btn info" style={{ padding: "3px 10px", fontSize: 11 }} onClick={() => joinByCode(s.code)}>Open</button>
+                  <button className="cb-btn danger" style={{ padding: "3px 9px", fontSize: 13, lineHeight: 1 }} title="Delete tournament" onClick={() => requestDeleteSession(s.code)}>×</button>
                 </div>
               ))}
             </div>
@@ -1871,8 +1878,8 @@ export default function Home() {
 
       {/* Live indicator */}
       {isLive && screen === "bracket" && !screenshotMode && (
-        <div style={{ position: "fixed", top: 10, right: 16, zIndex: 9999, display: "flex", alignItems: "center", gap: 6, background: "rgba(0,0,0,0.85)", border: "1px solid #22c55e", padding: "4px 10px", fontSize: 11, color: "#22c55e", letterSpacing: 1 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block", animation: "livePulse 1.4s ease-in-out infinite" }} />
+        <div className="cb-chip live" style={{ position: "fixed", top: 10, right: 16, zIndex: 9999, background: "rgba(8,9,12,0.92)", padding: "4px 12px" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--cb-red)", display: "inline-block", animation: "livePulse 1.6s ease-in-out infinite" }} />
           LIVE
         </div>
       )}
@@ -1882,35 +1889,35 @@ export default function Home() {
         <div className="action-bar">
           <button className="cb-btn" onClick={handleReset}>Reset Results</button>
           <button className="cb-btn" onClick={handleNewTournament}>Home</button>
-          {adminToken && <span style={{ fontSize: 11, color: "#a78bfa" }}>{authKind === "master" ? "Super-admin" : (authName || "Signed in")}</span>}
-          <button className="cb-btn" onClick={handleCompact} style={compactMode ? { borderColor: "#9b6dff", color: "#9b6dff" } : undefined}>{compactMode ? "Normal" : "Compact"}</button>
-          <button className="cb-btn" onClick={handleExportPng} style={{ borderColor: "#10b981", color: "#34d399" }}>Export PNG</button>
-          <button className="cb-btn" style={{ borderColor: "#f59e0b", color: "#fbbf24" }} onClick={() => setShowSavePanel(true)}>...</button>
+          {adminToken && <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10.5, letterSpacing: "0.08em", color: "var(--cb-purple2)" }}>{authKind === "master" ? "SUPER-ADMIN" : (authName || "Signed in")}</span>}
+          <button className={`cb-btn${compactMode ? " accent" : ""}`} onClick={handleCompact}>{compactMode ? "Normal" : "Compact"}</button>
+          <button className="cb-btn success" onClick={handleExportPng}>Export PNG</button>
+          <button className="cb-btn warn" onClick={() => setShowSavePanel(true)}>Saves</button>
           {/* Session chip */}
           {sessionCode && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(124,58,237,0.12)", border: "1px solid #7c3aed", padding: "4px 10px", fontSize: 11, letterSpacing: "0.08em" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(124,92,255,0.08)", border: "1px solid rgba(124,92,255,0.5)", padding: "4px 10px", fontSize: 11, letterSpacing: "0.08em" }}>
               <span style={{
                 width: 7, height: 7, borderRadius: "50%", display: "inline-block", flexShrink: 0,
-                background: syncStatus === "synced" ? "#22c55e" : syncStatus === "syncing" ? "#f59e0b" : syncStatus === "conflict" ? "#ef4444" : "#555566",
-                boxShadow: syncStatus === "syncing" ? "0 0 6px #f59e0b" : undefined,
+                background: syncStatus === "synced" ? "var(--cb-green)" : syncStatus === "syncing" ? "var(--cb-gold)" : syncStatus === "conflict" ? "var(--cb-red)" : "var(--cb-border2)",
+                boxShadow: syncStatus === "syncing" ? "0 0 6px var(--cb-gold)" : undefined,
               }} />
-              <span style={{ color: "#c4b5fd", fontWeight: 700 }}>{sessionCode}</span>
+              <span style={{ fontFamily: "var(--cb-font-mono)", color: "var(--cb-purple2)", fontWeight: 600 }}>{sessionCode}</span>
               {lastEditor && <span style={{ color: "var(--cb-muted)" }}>by {lastEditor}</span>}
-              <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10, borderColor: "#10b981", color: "#34d399" }} onClick={() => { navigator.clipboard.writeText(`https://rauder999.github.io/codebreakers-bracket/live.html?session=${sessionCode}`); toast.success("Live link copied!"); }}>Live Link</button>
-              {authKind !== "cohost" && <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10, borderColor: "#7c3aed", color: "#a78bfa" }} onClick={() => sessionCode && shareSession(sessionCode)}>Share</button>}
-              <button className="cb-btn" style={{ padding: "2px 7px", fontSize: 10, borderColor: "#555566", color: "var(--cb-muted)" }} onClick={handleLeaveSession}>Leave</button>
+              <button className="cb-btn success" style={{ padding: "2px 7px", fontSize: 10 }} onClick={() => { navigator.clipboard.writeText(`https://rauder999.github.io/codebreakers-bracket/live.html?session=${sessionCode}`); toast.success("Live link copied!"); }}>Live Link</button>
+              {authKind !== "cohost" && <button className="cb-btn accent" style={{ padding: "2px 7px", fontSize: 10 }} onClick={() => sessionCode && shareSession(sessionCode)}>Share</button>}
+              <button className="cb-btn ghost" style={{ padding: "2px 7px", fontSize: 10 }} onClick={handleLeaveSession}>Leave</button>
             </div>
           )}
-          <span style={{ fontSize: 10, color: "#444455", letterSpacing: "0.04em", marginLeft: 4 }}>Ctrl+Z undo · Ctrl+Y redo</span>
+          <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-muted)", opacity: 0.6, letterSpacing: "0.06em", marginLeft: 4 }}>CTRL+Z UNDO · CTRL+Y REDO</span>
         </div>
       )}
 
       {/* Match History Panel */}
       {showHistory && (
-        <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 340, background: "#0a0a0a", borderLeft: "1px solid var(--cb-border)", zIndex: 900, display: "flex", flexDirection: "column", fontFamily: "'Saira Condensed', sans-serif", boxShadow: "-4px 0 24px rgba(0,0,0,0.6)" }}>
+        <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 340, background: "var(--cb-bg)", borderLeft: "1px solid var(--cb-border2)", zIndex: 900, display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.6)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--cb-border)" }}>
-            <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.15em", color: "#22d3ee", textTransform: "uppercase" }}>Match History</span>
-            <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowHistory(false)}>X</button>
+            <span style={{ fontFamily: "var(--cb-font-display)", fontSize: 14, fontWeight: 700, letterSpacing: "0.15em", color: "var(--cb-cyan)", textTransform: "uppercase" }}>Match History</span>
+            <button className="cb-btn ghost" style={{ padding: "4px 8px" }} onClick={() => setShowHistory(false)}><X size={14} /></button>
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: "12px 16px" }}>
             {(() => {
@@ -1920,17 +1927,17 @@ export default function Home() {
                 const sorted = [...pod.teams].filter((t) => t.name && t.placement !== 0).sort((a, b) => a.placement - b.placement);
                 const isComplete = pod.teams.filter((t) => t.name).every((t) => t.placement !== 0);
                 return (
-                  <div key={pod.id} style={{ marginBottom: 12, background: "#141414", border: "1px solid var(--cb-border)", padding: "10px 12px" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: "var(--cb-muted)", marginBottom: 6, textTransform: "uppercase", display: "flex", justifyContent: "space-between" }}>
+                  <div key={pod.id} style={{ marginBottom: 12, background: "var(--cb-panel)", border: "1px solid var(--cb-border)", padding: "10px 12px" }}>
+                    <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, fontWeight: 500, letterSpacing: "0.14em", color: "var(--cb-muted)", marginBottom: 6, textTransform: "uppercase", display: "flex", justifyContent: "space-between" }}>
                       <span>{pod.label}</span>
-                      {!isComplete && <span style={{ color: "#f59e0b" }}>partial</span>}
+                      {!isComplete && <span style={{ color: "var(--cb-gold)" }}>partial</span>}
                     </div>
                     {sorted.map((t) => (
-                      <div key={t.name + t.placement} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: "1px solid #1a1a1a" }}>
-                        <span style={{ fontSize: 13, minWidth: 24, color: t.placement === 1 ? "#fbbf24" : t.placement === 2 ? "#94a3b8" : t.placement === 3 ? "#cd7c3a" : "var(--cb-muted)" }}>
-                          {PLACEMENT_EMOJIS[t.placement as Placement] || `#${t.placement}`}
+                      <div key={t.name + t.placement} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: "1px solid var(--cb-border)" }}>
+                        <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 11, minWidth: 24, color: PLACEMENT_COLORS[t.placement] || "var(--cb-muted)" }}>
+                          #{t.placement}
                         </span>
-                        <span style={{ fontSize: 13, fontWeight: t.placement === 1 ? 700 : 400, color: t.placement === 1 ? "var(--cb-text)" : "var(--cb-muted)" }}>{t.name}</span>
+                        <span style={{ fontFamily: "var(--cb-font-display)", fontSize: 13, fontWeight: t.placement === 1 ? 700 : 500, color: t.placement === 1 ? "var(--cb-gold)" : "var(--cb-muted)" }}>{t.name}</span>
                       </div>
                     ))}
                   </div>
@@ -1943,31 +1950,30 @@ export default function Home() {
 
       {/* Save/Load Panel */}
       {showSavePanel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowSavePanel(false)}>
-          <div style={{ background: "#0f0f0f", border: "1px solid var(--cb-border)", padding: 24, minWidth: 420, maxWidth: 560, maxHeight: "80vh", overflow: "auto", fontFamily: "'Saira Condensed', sans-serif" }} onClick={(e) => e.stopPropagation()}>
+        <div className="cb-modal-backdrop" style={{ zIndex: 1000 }} onClick={() => setShowSavePanel(false)}>
+          <div className="cb-modal" style={{ padding: 24, minWidth: 420, maxWidth: 560, maxHeight: "80vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: "0.15em", color: "#fbbf24", textTransform: "uppercase" }}>Tournaments</span>
-              <button className="cb-btn" onClick={() => setShowSavePanel(false)}>X Close</button>
+              <span className="cb-modal-title" style={{ color: "var(--cb-gold)" }}>Tournaments</span>
+              <button className="cb-btn ghost" style={{ padding: "4px 8px" }} onClick={() => setShowSavePanel(false)}><X size={14} /></button>
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-              <input value={saveNameInput} onChange={(e) => setSaveNameInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSaveTournament()} placeholder="Save name (optional)..."
-                style={{ flex: 1, background: "#1a1a1a", border: "1px solid var(--cb-border)", color: "var(--cb-text)", padding: "8px 12px", fontSize: 13, fontFamily: "'Saira Condensed', sans-serif", outline: "none" }} />
-              <button className="cb-btn" style={{ borderColor: "#22c55e", color: "#4ade80" }} onClick={handleSaveTournament}>Save</button>
+              <input className="team-input" value={saveNameInput} onChange={(e) => setSaveNameInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSaveTournament()} placeholder="Save name (optional)..." style={{ flex: 1 }} />
+              <button className="cb-btn success" onClick={handleSaveTournament}>Save</button>
             </div>
             {saves.length === 0 ? (
               <div style={{ color: "var(--cb-muted)", fontSize: 13, textAlign: "center", padding: 24 }}>No saved tournaments yet</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {saves.map((s) => (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#1a1a1a", border: "1px solid var(--cb-border)", padding: "8px 12px" }}>
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--cb-panel2)", border: "1px solid var(--cb-border)", padding: "8px 12px" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--cb-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
+                      <div style={{ fontFamily: "var(--cb-font-display)", fontSize: 13, fontWeight: 700, color: "var(--cb-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
                       <div style={{ fontSize: 11, color: "var(--cb-muted)", marginTop: 2 }}>
                         {s.tournamentMode === "double" ? "DE" : "SE"} · {s.tournamentSize} teams · {s.screen === "bracket" ? "In progress" : "Setup"} · {new Date(s.savedAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </div>
                     </div>
-                    <button className="cb-btn" style={{ borderColor: "#7c3aed", color: "#a78bfa", padding: "6px 12px", fontSize: 11 }} onClick={() => handleLoadTournament(s)}>Load</button>
-                    <button className="cb-btn" style={{ borderColor: "#ef4444", color: "#f87171", padding: "6px 12px", fontSize: 11 }} onClick={() => handleDeleteSave(s.id)}>X</button>
+                    <button className="cb-btn accent" style={{ padding: "6px 12px", fontSize: 11 }} onClick={() => handleLoadTournament(s)}>Load</button>
+                    <button className="cb-btn danger" style={{ padding: "6px 12px", fontSize: 11 }} onClick={() => handleDeleteSave(s.id)}>×</button>
                   </div>
                 ))}
               </div>
@@ -1978,20 +1984,20 @@ export default function Home() {
 
       {/* Connector legend */}
       {screen === "bracket" && !screenshotMode && (
-        <div style={{ position: "fixed", bottom: 16, left: 16, zIndex: 200, background: "rgba(10,10,12,0.85)", border: "1px solid var(--cb-border)", padding: "8px 12px", fontSize: 10, color: "var(--cb-muted)", letterSpacing: "0.06em", display: "flex", flexDirection: "column", gap: 5, backdropFilter: "blur(4px)" }}>
+        <div style={{ position: "fixed", bottom: 16, left: 16, zIndex: 200, background: "rgba(8,9,12,0.88)", border: "1px solid var(--cb-border)", padding: "8px 12px", fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-muted)", letterSpacing: "0.08em", textTransform: "uppercase", display: "flex", flexDirection: "column", gap: 5, backdropFilter: "blur(4px)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <svg width="28" height="4" viewBox="0 0 28 4"><line x1="0" y1="2" x2="28" y2="2" stroke="#22c55e" strokeWidth="2"/></svg>
+            <svg width="28" height="4" viewBox="0 0 28 4"><line x1="0" y1="2" x2="28" y2="2" stroke="#28d17c" strokeWidth="2"/></svg>
             <span>Advances</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <svg width="28" height="4" viewBox="0 0 28 4"><line x1="0" y1="2" x2="28" y2="2" stroke="#f97316" strokeWidth="2" strokeDasharray="4 3"/></svg>
+            <svg width="28" height="4" viewBox="0 0 28 4"><line x1="0" y1="2" x2="28" y2="2" stroke="#ff8a3d" strokeWidth="2" strokeDasharray="4 3"/></svg>
             <span>Drops to LB</span>
           </div>
         </div>
       )}
       {screen === "bracket" && screenshotMode && (
         <div className="screenshot-exit-bar">
-          <button className="cb-btn primary" onClick={handleScreenshot}>X Exit Screenshot</button>
+          <button className="cb-btn primary" onClick={handleScreenshot}>Exit Screenshot</button>
         </div>
       )}
     </div>
@@ -2078,10 +2084,10 @@ function MatchPod({ pod, isGF, isDE, isLB, onTeamClick, onMapClick, onStreamTogg
             className={`stream-toggle${pod.liveNow ? " live" : pod.onStream ? " active" : ""}`}
             onClick={(e) => { e.stopPropagation(); onStreamToggle(pod.id); }}
             title={streamTitle}
-          >📹</button>
+          ><Video size={13} /></button>
         )}
-        {pod.liveNow && screenshotMode && <span className="stream-badge-static">📹 LIVE</span>}
-        {pod.onStream && !pod.liveNow && screenshotMode && <span className="stream-badge-planned">📹</span>}
+        {pod.liveNow && screenshotMode && <span className="stream-badge-static">● LIVE</span>}
+        {pod.onStream && !pod.liveNow && screenshotMode && <span className="stream-badge-planned"><Video size={12} /></span>}
       </div>
 
       {/* Map plate */}
@@ -2112,7 +2118,6 @@ function MatchPod({ pod, isGF, isDE, isLB, onTeamClick, onMapClick, onStreamTogg
         else if (isDropping) rowClass += " dropping";
         else if (isEliminated) rowClass += " eliminated";
 
-        const emoji = isChampion ? "👑" : (PLACEMENT_EMOJIS[team.placement as Placement] || "");
         const placementLabel = team.placement !== 0 ? `[${PLACEMENT_LABELS[team.placement as Placement]}]` : "";
 
         return (
@@ -2125,7 +2130,7 @@ function MatchPod({ pod, isGF, isDE, isLB, onTeamClick, onMapClick, onStreamTogg
             {isGF && isDE && team.path && (
               <span className={`path-badge ${team.path === "wb" ? "wb-badge" : "lb-badge"}`}>[{team.path.toUpperCase()}]</span>
             )}
-            <span className="team-emoji">{emoji}</span>
+            <span className="team-emoji">{isChampion ? <Crown size={13} strokeWidth={2.2} fill="currentColor" /> : null}</span>
             <span className="team-name" style={{ color: isEmpty ? "var(--cb-muted)" : undefined }}>
               {team.name || "-"}
             </span>

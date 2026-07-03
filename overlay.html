@@ -5,16 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Codebreakers Stream Overlay</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;600;700;900&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
+  /* Terminal Violet broadcast tokens */
   :root {
-    --bg: #1d1c22;
-    --silver: #b8b8cc;
-    --purple: #9b6dff;
-    --cyan: #22d3ee;
-    --text: #f0f0f5;
-    --muted: #6b6b7a;
-    --win: #22c55e;
+    --panel: rgba(8,9,12,0.92);
+    --line: #1e222d;
+    --line2: #2b3142;
+    --silver: #aab1c5;
+    --purple: #7c5cff;
+    --purple2: #a48fff;
+    --cyan: #38e1e8;
+    --text: #e6e9f2;
+    --muted: #7f8698;
+    --red: #ff4d5e;
+    --fd: 'Space Grotesk', sans-serif;
+    --fm: 'IBM Plex Mono', monospace;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -22,7 +28,7 @@
   /* Transparent background so OBS Browser Source overlays cleanly */
   html, body {
     background: transparent;
-    font-family: 'Saira Condensed', sans-serif;
+    font-family: var(--fd);
     color: var(--text);
     overflow: hidden;
     width: 100%;
@@ -42,12 +48,12 @@
     display: flex;
     align-items: stretch;
     gap: 0;
-    background: linear-gradient(180deg, rgba(29,28,34,0.96), rgba(20,19,24,0.96));
-    border: 1px solid rgba(155,109,255,0.4);
-    border-radius: 4px;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.3);
+    background: var(--panel);
+    border: 1px solid var(--line2);
+    box-shadow: inset 0 1px 0 rgba(124,92,255,0.25), 0 12px 40px rgba(0,0,0,0.6);
     overflow: hidden;
     backdrop-filter: blur(4px);
+    clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
     opacity: 0;
     transition: opacity 300ms ease;
   }
@@ -57,14 +63,14 @@
   .team-col {
     flex: 1;
     min-width: 220px;
-    padding: 18px 22px;
+    padding: 20px 24px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     position: relative;
   }
   .team-col:not(:last-child) {
-    border-right: 1px solid rgba(184,184,204,0.12);
+    border-right: 1px solid var(--line);
   }
 
   .team-head {
@@ -73,16 +79,18 @@
     gap: 10px;
   }
   .team-seed {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--purple);
-    letter-spacing: 0.05em;
+    font-family: var(--fm);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--purple2);
+    letter-spacing: 0.08em;
     min-width: 28px;
   }
   .team-name {
-    font-size: 26px;
-    font-weight: 900;
-    letter-spacing: 0.02em;
+    font-family: var(--fd);
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     line-height: 1;
     white-space: nowrap;
@@ -92,57 +100,56 @@
 
   .roster {
     display: flex;
-    flex-direction: column;
-    gap: 3px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
     padding-left: 2px;
   }
   .player {
-    font-size: 14px;
-    font-weight: 600;
+    font-family: var(--fm);
+    font-size: 11px;
+    font-weight: 500;
     color: var(--silver);
-    letter-spacing: 0.03em;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .player::before {
-    content: "";
-    width: 4px; height: 4px;
-    background: var(--cyan);
-    border-radius: 50%;
-    flex-shrink: 0;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.02);
   }
 
   /* Header strip: tournament name + match label */
   .match-header {
     position: absolute;
-    top: -34px;
+    top: -36px;
     left: 0;
     right: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 12px;
   }
   .match-label {
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.22em;
+    font-family: var(--fd);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.26em;
     text-transform: uppercase;
-    color: var(--cyan);
+    color: var(--text);
+    text-shadow: 0 2px 12px rgba(0,0,0,0.8);
   }
   .match-map {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.15em;
+    font-family: var(--fm);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--cyan);
+    text-shadow: 0 2px 10px rgba(0,0,0,0.8);
   }
   .live-dot {
     width: 8px; height: 8px; border-radius: 50%;
-    background: #ef4444;
-    box-shadow: 0 0 8px #ef4444;
-    animation: pulse 1.4s infinite;
+    background: var(--red);
+    box-shadow: 0 0 8px var(--red);
+    animation: pulse 1.6s infinite;
   }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
@@ -151,11 +158,16 @@
   .match-card.teams-2 { max-width: 720px; }
 
   #waiting {
+    font-family: var(--fm);
     color: var(--muted);
-    font-size: 16px;
-    letter-spacing: 0.1em;
+    font-size: 13px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     opacity: 0.6;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live-dot { animation: none; }
   }
 </style>
 </head>

@@ -6,56 +6,84 @@
   <title>Codebreakers - Live</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;600;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
-    /* ─── Cold Steel palette ─── */
+    /* ─── Terminal Violet tokens ───
+       violet = brand · green = advance · orange = drop to LB
+       red = LIVE · gold = champion · dimmed = eliminated */
     :root {
-      --cb-bg:      #0a0a0a;
-      --cb-panel:   #111115;
-      --cb-border:  #222228;
-      --cb-text:    #e8e8f0;
-      --cb-muted:   #888899;
-      --cb-silver:  #b8b8cc;
-      --cb-purple:  #9b6dff;
-      --cb-green:   #22c55e;
-      --cb-orange:  #f97316;
-      --cb-gold:    #f59e0b;
+      --cb-bg:      #08090c;
+      --cb-panel:   #0d0f14;
+      --cb-panel2:  #12151d;
+      --cb-border:  #1e222d;
+      --cb-border2: #2b3142;
+      --cb-text:    #e6e9f2;
+      --cb-muted:   #7f8698;
+      --cb-silver:  #aab1c5;
+      --cb-purple:  #7c5cff;
+      --cb-purple2: #a48fff;
+      --cb-green:   #28d17c;
+      --cb-red:     #ff4d5e;
+      --cb-orange:  #ff8a3d;
+      --cb-gold:    #e8b64a;
+      --cb-cyan:    #38e1e8;
+      --fd: 'Space Grotesk', sans-serif;
+      --ft: 'Inter', sans-serif;
+      --fm: 'IBM Plex Mono', monospace;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background: var(--cb-bg);
       color: var(--cb-text);
-      font-family: 'Saira Condensed', sans-serif;
+      font-family: var(--ft);
       font-size: 14px;
       min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.016) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.016) 1px, transparent 1px);
+      background-size: 44px 44px;
     }
+    ::selection { background: rgba(124,92,255,0.35); }
     /* ─── Header ─── */
     .cb-header {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 24px 16px 16px;
+      padding: 26px 16px 18px;
       border-bottom: 1px solid var(--cb-border);
+      position: relative;
+    }
+    .cb-header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 600px; height: 160px;
+      background: radial-gradient(ellipse at center, rgba(124,92,255,0.07) 0%, transparent 70%);
+      pointer-events: none;
     }
     .cb-title {
-      font-weight: 800;
-      font-size: 28px;
-      letter-spacing: 0.25em;
+      font-family: var(--fd);
+      font-weight: 700;
+      font-size: 26px;
+      letter-spacing: 0.26em;
       text-transform: uppercase;
       color: var(--cb-text);
     }
     .cb-subtitle {
+      font-family: var(--fm);
       font-weight: 400;
-      font-size: 11px;
-      letter-spacing: 0.35em;
+      font-size: 10px;
+      letter-spacing: 0.42em;
       text-transform: uppercase;
-      color: var(--cb-muted);
-      margin-top: 2px;
+      color: var(--cb-purple2);
+      margin-top: 5px;
     }
     .cb-tournament-name {
-      font-weight: 800;
-      font-size: 18px;
-      letter-spacing: 0.12em;
+      font-family: var(--fd);
+      font-weight: 700;
+      font-size: 17px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--cb-gold);
       margin-top: 8px;
@@ -64,24 +92,26 @@
       display: none;
       align-items: center;
       gap: 6px;
-      background: rgba(34,197,94,0.1);
-      border: 1px solid var(--cb-green);
-      color: var(--cb-green);
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.2em;
-      padding: 3px 10px;
-      margin-top: 8px;
+      background: rgba(255,77,94,0.08);
+      border: 1px solid rgba(255,77,94,0.55);
+      color: var(--cb-red);
+      font-family: var(--fm);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.22em;
+      padding: 3px 12px;
+      margin-top: 10px;
+      clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
     }
     .live-dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: var(--cb-green);
-      animation: livePulse 1.4s ease-in-out infinite;
+      background: var(--cb-red);
+      animation: livePulse 1.6s ease-in-out infinite;
     }
     @keyframes livePulse {
-      0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--cb-green); }
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--cb-red); }
       50%       { opacity: 0.3; box-shadow: none; }
     }
     /* ─── Status bar ─── */
@@ -91,32 +121,36 @@
       justify-content: space-between;
       padding: 8px 20px;
       border-bottom: 1px solid var(--cb-border);
-      font-size: 11px;
+      font-family: var(--fm);
+      font-size: 10.5px;
       color: var(--cb-muted);
       letter-spacing: 0.05em;
     }
     .back-btn, .refresh-btn {
-      background: transparent;
-      border: 1px solid var(--cb-border);
+      background: var(--cb-panel);
+      border: 1px solid var(--cb-border2);
       color: var(--cb-silver);
-      font-family: 'Saira Condensed', sans-serif;
-      font-size: 11px;
+      font-family: var(--fd);
+      font-weight: 600;
+      font-size: 10.5px;
       letter-spacing: 0.1em;
+      text-transform: uppercase;
       padding: 4px 12px;
       cursor: pointer;
       transition: border-color 150ms, color 150ms;
     }
-    .back-btn:hover, .refresh-btn:hover { border-color: var(--cb-silver); color: var(--cb-text); }
+    .back-btn:hover, .refresh-btn:hover { border-color: var(--cb-purple); color: var(--cb-text); }
 
     /* ─── Gallery ─── */
     #gallery-view { display: none; }
     .gallery-header {
       padding: 24px 20px 12px;
+      font-family: var(--fd);
       font-size: 13px;
-      font-weight: 800;
+      font-weight: 700;
       letter-spacing: 0.2em;
       text-transform: uppercase;
-      color: var(--cb-purple);
+      color: var(--cb-purple2);
       border-bottom: 1px solid var(--cb-border);
     }
     .gallery-grid {
@@ -130,51 +164,58 @@
       border: 1px solid var(--cb-border);
       padding: 18px 20px;
       cursor: pointer;
-      transition: border-color 150ms, background 150ms;
+      transition: border-color 150ms, background 150ms, transform 150ms, box-shadow 150ms;
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
     .gallery-card:hover {
       border-color: var(--cb-purple);
-      background: rgba(155,109,255,0.05);
+      background: rgba(124,92,255,0.05);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(0,0,0,0.45);
     }
     .gallery-card-name {
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: 0.1em;
+      font-family: var(--fd);
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--cb-text);
     }
     .gallery-card-meta {
-      font-size: 11px;
+      font-family: var(--fm);
+      font-size: 10px;
       color: var(--cb-muted);
-      letter-spacing: 0.08em;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
     }
     .gallery-card-updated {
-      font-size: 11px;
-      color: var(--cb-green);
+      font-family: var(--fm);
+      font-size: 10.5px;
+      color: var(--cb-cyan);
       letter-spacing: 0.05em;
       margin-top: 4px;
     }
     .gallery-card-host {
       font-size: 11px;
       color: var(--cb-silver);
-      letter-spacing: 0.05em;
+      letter-spacing: 0.03em;
     }
     .gallery-card-arrow {
       align-self: flex-end;
       font-size: 18px;
-      color: var(--cb-purple);
+      color: var(--cb-purple2);
       margin-top: 4px;
+      transition: transform 150ms;
     }
+    .gallery-card:hover .gallery-card-arrow { transform: translateX(4px); }
     .gallery-empty {
       padding: 48px 20px;
       text-align: center;
       color: var(--cb-muted);
       font-size: 14px;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.04em;
     }
     /* Manual code entry */
     .gallery-fallback {
@@ -186,38 +227,41 @@
       flex-wrap: wrap;
     }
     .gallery-fallback-label {
-      font-size: 11px;
+      font-size: 11.5px;
       color: var(--cb-muted);
-      letter-spacing: 0.08em;
+      letter-spacing: 0.03em;
     }
     .code-input {
       background: var(--cb-panel);
-      border: 1px solid var(--cb-border);
-      color: var(--cb-text);
-      font-family: 'Saira Condensed', monospace;
-      font-size: 14px;
-      font-weight: 700;
+      border: 1px solid var(--cb-border2);
+      color: var(--cb-cyan);
+      font-family: var(--fm);
+      font-size: 13px;
+      font-weight: 600;
       letter-spacing: 0.15em;
       padding: 6px 12px;
       text-transform: uppercase;
-      width: 120px;
+      width: 130px;
       outline: none;
-      transition: border-color 150ms;
+      transition: border-color 150ms, box-shadow 150ms;
     }
-    .code-input:focus { border-color: var(--cb-purple); }
+    .code-input:focus { border-color: var(--cb-purple); box-shadow: 0 0 0 3px rgba(124,92,255,0.14); }
+    .code-input::placeholder { color: var(--cb-muted); }
     .code-go-btn {
-      background: transparent;
-      border: 1px solid var(--cb-purple);
-      color: var(--cb-purple);
-      font-family: 'Saira Condensed', sans-serif;
+      background: var(--cb-purple);
+      border: none;
+      color: #0b0716;
+      font-family: var(--fd);
       font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.12em;
-      padding: 6px 16px;
+      text-transform: uppercase;
+      padding: 7px 18px;
       cursor: pointer;
-      transition: background 150ms, color 150ms;
+      transition: background 150ms, box-shadow 150ms;
+      clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
     }
-    .code-go-btn:hover { background: rgba(155,109,255,0.12); color: var(--cb-text); }
+    .code-go-btn:hover { background: var(--cb-purple2); box-shadow: 0 0 20px rgba(124,92,255,0.35); }
 
     /* ─── Bracket view ─── */
     #bracket-view { display: none; }
@@ -227,10 +271,15 @@
       align-items: center;
       justify-content: center;
       min-height: 40vh;
-      gap: 12px;
+      gap: 16px;
       color: var(--cb-muted);
       font-size: 14px;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.04em;
+    }
+    .waiting-pulse {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--cb-purple);
+      animation: livePulse 1.6s ease-in-out infinite;
     }
     .bracket-container {
       overflow-x: auto;
@@ -253,24 +302,24 @@
     }
     .de-row { display: flex; flex-direction: column; padding: 12px 0; }
     .de-row-label {
-      font-weight: 800; font-size: 10px; letter-spacing: 0.25em;
+      font-family: var(--fm); font-weight: 500; font-size: 10px; letter-spacing: 0.3em;
       text-transform: uppercase; padding: 0 16px 8px;
-      border-bottom: 1px solid rgba(155,109,255,0.2); margin-bottom: 8px;
+      border-bottom: 1px solid rgba(124,92,255,0.2); margin-bottom: 8px;
     }
-    .wb-row-label { color: var(--cb-purple); }
-    .lb-row-label { color: var(--cb-orange); }
+    .wb-row-label { color: var(--cb-purple2); }
+    .lb-row-label { color: var(--cb-orange); border-bottom-color: rgba(255,138,61,0.2); }
     .de-row-phases { display: flex; flex-direction: row; align-items: center; padding: 12px 0; }
-    .de-zone-divider { grid-column: 1 / 3; height: 1px; background: rgba(155,109,255,0.15); margin: 0; }
+    .de-zone-divider { grid-column: 1 / 3; height: 1px; background: linear-gradient(to right, rgba(124,92,255,0.25), rgba(255,138,61,0.25)); margin: 0; }
     .de-gf-column {
       grid-column: 2; grid-row: 1 / 4;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 16px 16px 16px 8px;
-      border-left: 1px solid rgba(245,158,11,0.2);
+      border-left: 1px solid rgba(232,182,74,0.2);
       min-width: 200px;
     }
     .bracket-phase { display: flex; flex-direction: column; align-items: center; padding: 0 8px; }
     .phase-label {
-      font-weight: 800; font-size: 10px; letter-spacing: 0.25em;
+      font-family: var(--fm); font-weight: 500; font-size: 9.5px; letter-spacing: 0.26em;
       text-transform: uppercase; color: var(--cb-muted);
       padding-bottom: 8px; text-align: center;
     }
@@ -285,45 +334,52 @@
       min-width: 180px; max-width: 240px;
       display: flex; flex-direction: column;
     }
-    .gf-pod { border-color: rgba(245,158,11,0.4); min-width: 200px; }
-    .lb-pod { border-color: rgba(249,115,22,0.25); }
+    .gf-pod { border-color: rgba(232,182,74,0.6); min-width: 200px; box-shadow: 0 0 16px rgba(232,182,74,0.08); }
+    .lb-pod { border-color: rgba(255,138,61,0.3); }
     .pod-header {
-      font-weight: 800; font-size: 9px; letter-spacing: 0.2em;
+      font-family: var(--fm); font-weight: 500; font-size: 9px; letter-spacing: 0.18em;
       text-transform: uppercase; color: var(--cb-muted);
       padding: 5px 10px; border-bottom: 1px solid var(--cb-border);
-      background: rgba(255,255,255,0.02);
+      background: var(--cb-panel2);
+      display: flex; align-items: center; gap: 6px;
     }
-    .gf-header { color: var(--cb-gold); border-bottom-color: rgba(245,158,11,0.3); }
-    .lb-header { color: var(--cb-orange); }
+    .gf-header { color: var(--cb-gold); border-bottom-color: rgba(232,182,74,0.3); background: rgba(232,182,74,0.05); }
+    .lb-header { color: var(--cb-orange); background: rgba(255,138,61,0.05); }
     /* Map plate */
     .map-plate {
       display: flex; align-items: center; gap: 6px;
-      padding: 3px 10px; border-bottom: 1px solid var(--cb-border);
-      background: rgba(155,109,255,0.04);
+      padding: 3px 10px; border-bottom: 1px solid rgba(124,92,255,0.18);
+      background: rgba(124,92,255,0.05);
     }
-    .map-name { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--cb-purple); }
-    /* ─── Team rows ─── */
+    .map-name { font-family: var(--fm); font-size: 9.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cb-purple2); }
+    /* ─── Team rows — semantic states ───
+       LIVE (red pod glow) / ADVANCE (green) / DROP->LB (orange)
+       ELIMINATED (dim + strikethrough) / CHAMPION (gold)          */
     .team-row {
       display: flex; align-items: center; gap: 6px;
       padding: 6px 10px; border-bottom: 1px solid var(--cb-border);
+      border-left: 3px solid transparent;
       font-size: 13px; transition: background 120ms;
     }
     .team-row:last-child { border-bottom: none; }
-    .team-row.champion { background: rgba(245,158,11,0.08); }
-    .team-row.advancing { background: rgba(34,197,94,0.06); }
-    .team-row.dropping { background: rgba(249,115,22,0.06); }
-    .team-row.eliminated { opacity: 0.45; }
-    .team-seed-group { display: flex; align-items: center; gap: 3px; min-width: 32px; }
-    .team-seed { font-size: 10px; color: var(--cb-muted); letter-spacing: 0.05em; }
-    .team-emoji { font-size: 12px; min-width: 16px; text-align: center; }
+    .team-row.champion { background: rgba(232,182,74,0.07); border-left-color: var(--cb-gold); }
+    .team-row.advancing { background: rgba(40,209,124,0.05); border-left-color: var(--cb-green); }
+    .team-row.dropping { background: rgba(255,138,61,0.05); border-left-color: var(--cb-orange); }
+    .team-row.eliminated { opacity: 0.38; }
+    .team-row.eliminated .team-name { text-decoration: line-through; text-decoration-color: var(--cb-muted); text-decoration-thickness: 1px; }
+    .team-seed-group { display: flex; align-items: center; gap: 3px; min-width: 30px; }
+    .team-seed { font-family: var(--fm); font-size: 9.5px; color: var(--cb-muted); opacity: 0.75; letter-spacing: 0.02em; }
+    .team-emoji { font-size: 12px; min-width: 16px; text-align: center; color: var(--cb-gold); }
     .team-name {
-      flex: 1; font-weight: 600; font-size: 13px; letter-spacing: 0.04em;
+      flex: 1; font-family: var(--fd); font-weight: 600; font-size: 13px; letter-spacing: 0.02em;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       position: relative;
     }
-    .team-name.empty { color: var(--cb-muted); font-style: italic; font-weight: 400; }
+    .team-row.champion .team-name { color: var(--cb-gold); }
+    .team-row.dropping .team-name { color: var(--cb-orange); }
+    .team-name.empty { color: var(--cb-muted); font-style: italic; font-weight: 400; font-family: var(--ft); }
     .team-name.has-roster {
-      border-bottom: 1px dashed var(--cb-muted);
+      border-bottom: 1px dashed rgba(164,143,255,0.45);
       cursor: default;
       overflow: visible;
     }
@@ -331,43 +387,50 @@
       display: none;
       position: absolute;
       left: 0; top: calc(100% + 4px);
-      background: #18181f;
-      border: 1px solid var(--cb-border);
+      background: var(--cb-panel2);
+      border: 1px solid rgba(124,92,255,0.6);
       padding: 8px 12px;
       z-index: 1000;
       min-width: 160px;
       max-width: 260px;
       flex-direction: column;
       gap: 3px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.7);
       pointer-events: none;
     }
     .team-name.has-roster:hover .roster-tooltip { display: flex; }
-    .roster-tooltip-title { font-weight: 800; font-size: 11px; letter-spacing: 0.12em; color: var(--cb-text); text-transform: uppercase; margin-bottom: 4px; }
-    .roster-tooltip-player { font-size: 12px; color: var(--cb-silver); letter-spacing: 0.04em; }
-    .placement-badge { font-size: 10px; color: var(--cb-muted); letter-spacing: 0.05em; flex-shrink: 0; }
-    .champion-badge { color: var(--cb-gold); font-weight: 800; }
-    .path-badge { font-size: 9px; font-weight: 800; letter-spacing: 0.12em; flex-shrink: 0; padding: 1px 4px; }
-    .wb-badge { background: rgba(155,109,255,0.15); color: var(--cb-purple); }
-    .lb-badge { background: rgba(249,115,22,0.15); color: var(--cb-orange); }
+    .roster-tooltip-title { font-family: var(--fm); font-weight: 600; font-size: 10px; letter-spacing: 0.12em; color: var(--cb-purple2); text-transform: uppercase; margin-bottom: 4px; border-bottom: 1px solid rgba(124,92,255,0.3); padding-bottom: 4px; }
+    .roster-tooltip-player { font-family: var(--ft); font-size: 12px; color: var(--cb-text); letter-spacing: 0.02em; font-weight: 500; }
+    .placement-badge { font-family: var(--fm); font-size: 9.5px; color: var(--cb-muted); letter-spacing: 0.05em; flex-shrink: 0; }
+    .team-row.advancing .placement-badge { color: var(--cb-green); }
+    .team-row.dropping .placement-badge { color: var(--cb-orange); }
+    .champion-badge { color: var(--cb-gold) !important; font-weight: 600; }
+    .path-badge { font-family: var(--fm); font-size: 8.5px; font-weight: 500; letter-spacing: 0.1em; flex-shrink: 0; padding: 1px 4px; border: 1px solid; }
+    .wb-badge { background: rgba(124,92,255,0.08); border-color: rgba(124,92,255,0.4); color: var(--cb-purple2); }
+    .lb-badge { background: rgba(255,138,61,0.08); border-color: rgba(255,138,61,0.4); color: var(--cb-orange); }
     /* ─── Streaming treatment ─── */
     .match-pod.on-stream {
-      box-shadow: 0 0 0 1px rgba(34,211,238,0.5);
+      box-shadow: 0 0 0 1px rgba(56,225,232,0.45);
     }
     .match-pod.on-stream .pod-header {
-      background: rgba(34,211,238,0.08);
-      color: #67e8f9;
+      background: rgba(56,225,232,0.07);
+      color: var(--cb-cyan);
     }
     .match-pod.live-now {
-      box-shadow: 0 0 0 1px #ef4444, 0 0 12px rgba(239,68,68,0.25);
+      border-color: rgba(255,77,94,0.6);
+      box-shadow: 0 0 0 1px rgba(255,77,94,0.3), 0 0 22px rgba(255,77,94,0.12);
+      animation: livePodPulse 2.4s ease-in-out infinite;
     }
     .match-pod.live-now .pod-header {
-      background: rgba(239,68,68,0.12);
-      color: #fca5a5;
+      background: rgba(255,77,94,0.10);
+      color: var(--cb-red);
+    }
+    @keyframes livePodPulse {
+      50% { box-shadow: 0 0 0 1px rgba(255,77,94,0.5), 0 0 30px rgba(255,77,94,0.22); }
     }
     .stream-live-badge {
-      font-size: 9px; font-weight: 800; letter-spacing: 0.1em;
-      color: #ef4444; padding: 0 10px 4px;
+      font-family: var(--fm); font-size: 9px; font-weight: 600; letter-spacing: 0.12em;
+      color: var(--cb-red);
     }
     /* ─── Compact mode ─── */
     body.compact .team-row { padding: 3px 10px; min-height: 0; font-size: 11px; }
@@ -379,18 +442,24 @@
     body.compact .match-pod { min-width: 160px; }
     /* Compact toggle button */
     .compact-btn {
-      background: transparent;
-      border: 1px solid var(--cb-border);
+      background: var(--cb-panel);
+      border: 1px solid var(--cb-border2);
       color: var(--cb-silver);
-      font-family: 'Saira Condensed', sans-serif;
-      font-size: 11px;
+      font-family: var(--fd);
+      font-weight: 600;
+      font-size: 10.5px;
       letter-spacing: 0.1em;
+      text-transform: uppercase;
       padding: 4px 12px;
       cursor: pointer;
       transition: border-color 150ms, color 150ms;
     }
-    .compact-btn:hover { border-color: var(--cb-silver); color: var(--cb-text); }
-    .compact-btn.active { border-color: var(--cb-purple); color: var(--cb-purple); }
+    .compact-btn:hover { border-color: var(--cb-purple); color: var(--cb-text); }
+    .compact-btn.active { border-color: var(--cb-purple); color: var(--cb-purple2); background: rgba(124,92,255,0.08); }
+    /* ─── Reduced motion ─── */
+    @media (prefers-reduced-motion: reduce) {
+      .live-dot, .waiting-pulse, .match-pod.live-now { animation: none !important; }
+    }
   </style>
 </head>
 <body>
@@ -437,7 +506,6 @@
     const POLL_INTERVAL = 5000;
     const GALLERY_POLL = 15000;
     const PLACEMENT_LABELS = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th", 6: "6th", 7: "7th", 8: "8th" };
-    const PLACEMENT_EMOJIS = { 1: "👑", 2: "🥈", 3: "🥉" };
 
     let currentSession = null;
     let lastUpdated = null;
@@ -620,7 +688,7 @@
       document.getElementById("liveBadge").style.display = "none";
       document.getElementById("main").innerHTML = `
         <div class="waiting-screen">
-          <span style="font-size:36px">⏳</span>
+          <span class="waiting-pulse"></span>
           <span>${msg || "Tournament hasn't started yet. Check back soon."}</span>
         </div>`;
       document.getElementById("statusText").textContent = "Waiting for data...";
@@ -741,7 +809,7 @@
       else if (isAdvancing)  cls += " advancing";
       else if (isDropping)   cls += " dropping";
       else if (isEliminated) cls += " eliminated";
-      const emoji = isChampion ? "👑" : (PLACEMENT_EMOJIS[placement] || "");
+      const emoji = isChampion ? "&#9819;" : "";
       const placementLabel = placement !== 0 ? `[${PLACEMENT_LABELS[placement]}]` : "";
       let inner = "";
       if (!isGF) {
@@ -777,8 +845,8 @@
       const podSize = pod.teams.length;
       let html = `<div class="${podCls}" data-pod-id="${pod.id}">`;
       const streamBadge = isLiveNow
-        ? ` <span class="stream-live-badge">&#128247; LIVE</span>`
-        : isOnStream ? ` <span class="stream-live-badge" style="color:#67e8f9">&#128247;</span>` : "";
+        ? ` <span class="stream-live-badge">&#9679; LIVE</span>`
+        : isOnStream ? ` <span class="stream-live-badge" style="color:var(--cb-cyan)">&#9679;</span>` : "";
       html += `<div class="${headerCls}">${pod.label}${streamBadge}</div>`;
       if (pod.map) html += `<div class="map-plate"><span class="map-name">${escHtml(pod.map)}</span></div>`;
       for (const team of pod.teams) html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop, podSize);
@@ -978,7 +1046,7 @@
       svg.classList.add("connector-svg-overlay");
       svg.setAttribute("style", "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible");
       for (const c of lines) {
-        const color = c.isDrop ? (c.active ? "#f97316" : "#2a1808") : (c.active ? "#22c55e" : "#1e1e28");
+        const color = c.isDrop ? (c.active ? "#ff8a3d" : "#2b1c10") : (c.active ? "#28d17c" : "#20242f");
         const sw = c.active ? 1.6 : 1;
         const cx = Math.max(c.x1 + 8, c.channelX);
         const dirY = c.y2 >= c.y1 ? 1 : -1;

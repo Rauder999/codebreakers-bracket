@@ -31,16 +31,26 @@ Four standalone HTML pages serve different audiences:
 
 ## Design System
 
-All pages share a "Cold Steel" CSS custom-property palette:
+All pages share the "Terminal Violet" CSS custom-property palette (2026 redesign):
 
 ```
---cb-bg: #0a0a0a       --cb-purple: #9b6dff
---cb-panel: #111115    --cb-green:  #22c55e
---cb-border: #222228   --cb-gold:   #f59e0b
---cb-text: #e8e8f0
+--cb-bg: #08090c       --cb-purple: #7c5cff   (brand accent)
+--cb-panel: #0d0f14    --cb-purple2: #a48fff  (accent hover/text)
+--cb-panel2: #12151d   --cb-green: #28d17c    (ADVANCE)
+--cb-border: #1e222d   --cb-red: #ff4d5e      (LIVE)
+--cb-border2: #2b3142  --cb-orange: #ff8a3d   (DROP to losers bracket)
+--cb-text: #e6e9f2     --cb-gold: #e8b64a     (CHAMPION)
+--cb-muted: #7f8698    --cb-cyan: #38e1e8     (session codes / live data)
+--cb-silver: #aab1c5
 ```
 
-Font: **Saira Condensed** (Google Fonts, weights 400/600/800).
+Semantic state rules (do not mix): LIVE = red pulse, drop to LB = orange,
+advance = green, champion = gold, eliminated = 38% opacity + line-through.
+
+Fonts (Google Fonts): **Space Grotesk** 500/600/700 (display, team names,
+buttons), **Inter** 400/500/600 (body text, inputs), **IBM Plex Mono**
+400/500/600 (seeds, codes, pod headers, chips). Primary CTAs use broadcast
+corner cuts via `clip-path` (`--cb-cut: 8px`). No border-radius elsewhere.
 
 ## Bracket Connector Architecture
 
