@@ -209,20 +209,22 @@ function shortLabel(l: string): string {
 // round; orange dashed = losers dropping from a Winners block into the Losers
 // Bracket. N×K on a node means N matches of K teams each.
 function BracketPreview({ size, mode, opts, config }: { size: Size; mode: TournamentMode; opts: EngineOptions; config: FormatConfig }) {
+  const [hover, setHover] = useState<string | null>(null);
   const graph = getPhaseGraph(size, mode, opts);
   const psOf = (p: Parameters<typeof effectivePodSize>[0]) => effectivePodSize(p, config);
   const pcOf = (p: Parameters<typeof effectivePodSize>[0]) => p.id === "fbracket" ? 2 : Math.max(1, Math.ceil(p.inputCount / psOf(p)));
 
   const top = graph.filter((p) => p.bracket === "wb" || p.bracket === "gf");
   const bot = graph.filter((p) => p.bracket === "lb");
-  const colW = 84, nodeW = 64, nodeH = 32, marginX = 14, topY = 30;
-  const botY = bot.length ? topY + 116 : topY;
+  // Roomier geometry — the preview panel is a proper sidebar now, so nodes can breathe.
+  const colW = 104, nodeW = 82, nodeH = 44, marginX = 16, topY = 40;
+  const botY = bot.length ? topY + 150 : topY;
   type P = { x: number; y: number; w: number; h: number; cx: number; cy: number };
   const pos: Record<string, P> = {};
   top.forEach((p, i) => { const x = marginX + i * colW; pos[p.id] = { x, y: topY, w: nodeW, h: nodeH, cx: x + nodeW / 2, cy: topY + nodeH / 2 }; });
   bot.forEach((p, i) => { const x = marginX + i * colW; pos[p.id] = { x, y: botY, w: nodeW, h: nodeH, cx: x + nodeW / 2, cy: botY + nodeH / 2 }; });
   const width = marginX * 2 + Math.max(top.length, bot.length, 1) * colW;
-  const height = botY + nodeH + 14;
+  const height = botY + nodeH + 16;
 
   const adv: [string, string][] = [];
   const drop: [string, string][] = [];
@@ -232,26 +234,62 @@ function BracketPreview({ size, mode, opts, config }: { size: Size; mode: Tourna
   }
   const strokeFor = (b: string) => b === "gf" ? "#e8b64a" : b === "lb" ? "#ff8a3d" : "#7c5cff";
 
+  // Hover: light up the hovered node and the nodes its teams flow into.
+  const hoverPhase = hover ? graph.find((p) => p.id === hover) : null;
+  const lit = new Set<string>();
+  if (hoverPhase) {
+    lit.add(hoverPhase.id);
+    if (hoverPhase.advanceTo && pos[hoverPhase.advanceTo]) lit.add(hoverPhase.advanceTo);
+    if (mode === "double" && hoverPhase.dropTo && !hoverPhase.hasNoLBDrop && pos[hoverPhase.dropTo]) lit.add(hoverPhase.dropTo);
+  }
+
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: "block" }} fontFamily="'IBM Plex Mono', monospace">
-        <text x={marginX} y={topY - 12} fill="#a48fff" fontSize={8} letterSpacing={2}>WINNERS BRACKET → FINALS</text>
-        {bot.length > 0 && <text x={marginX} y={botY - 12} fill="#ff8a3d" fontSize={8} letterSpacing={2}>LOSERS BRACKET</text>}
-        {adv.map(([a, b], i) => { const s = pos[a], t = pos[b]; return <path key={"a" + i} d={`M ${s.x + s.w} ${s.cy} C ${s.x + s.w + 18} ${s.cy}, ${t.x - 18} ${t.cy}, ${t.x} ${t.cy}`} stroke="#28d17c" strokeWidth={1.2} fill="none" opacity={0.6} />; })}
-        {drop.map(([a, b], i) => { const s = pos[a], t = pos[b]; const my = (s.y + s.h + t.y) / 2; return <path key={"d" + i} d={`M ${s.cx} ${s.y + s.h} C ${s.cx} ${my}, ${t.cx} ${my}, ${t.cx} ${t.y}`} stroke="#ff8a3d" strokeWidth={1.3} strokeDasharray="4 3" fill="none" opacity={0.85} />; })}
-        {graph.map((p) => { const n = pos[p.id]; if (!n) return null; const c = strokeFor(p.bracket); return (
-          <g key={p.id}>
-            <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={0} fill={c + "1e"} stroke={c} strokeWidth={1} />
-            <text x={n.cx} y={n.y + 13} textAnchor="middle" fill="#dfe3ef" fontSize={7}>{shortLabel(p.label)}</text>
-            <text x={n.cx} y={n.y + 25} textAnchor="middle" fill={c === "#7c5cff" ? "#a48fff" : c} fontSize={9} fontWeight={600}>{pcOf(p)}×{psOf(p)}</text>
-          </g>
-        ); })}
+        <text x={marginX} y={topY - 14} fill="#a48fff" fontSize={9} letterSpacing={2}>WINNERS BRACKET → FINALS</text>
+        {bot.length > 0 && <text x={marginX} y={botY - 14} fill="#ff8a3d" fontSize={9} letterSpacing={2}>LOSERS BRACKET</text>}
+        {adv.map(([a, b], i) => {
+          const s = pos[a], t = pos[b];
+          const hot = hover === a;
+          const dim = hover !== null && !hot;
+          return <path key={"a" + i} d={`M ${s.x + s.w} ${s.cy} C ${s.x + s.w + 22} ${s.cy}, ${t.x - 22} ${t.cy}, ${t.x} ${t.cy}`}
+            stroke="#28d17c" strokeWidth={hot ? 2.6 : 1.4} fill="none"
+            opacity={dim ? 0.12 : hot ? 1 : 0.6}
+            style={{ filter: hot ? "drop-shadow(0 0 4px rgba(40,209,124,0.7))" : undefined, transition: "opacity 120ms, stroke-width 120ms" }} />;
+        })}
+        {drop.map(([a, b], i) => {
+          const s = pos[a], t = pos[b]; const my = (s.y + s.h + t.y) / 2;
+          const hot = hover === a;
+          const dim = hover !== null && !hot;
+          return <path key={"d" + i} d={`M ${s.cx} ${s.y + s.h} C ${s.cx} ${my}, ${t.cx} ${my}, ${t.cx} ${t.y}`}
+            stroke="#ff8a3d" strokeWidth={hot ? 2.4 : 1.4} strokeDasharray="4 3" fill="none"
+            opacity={dim ? 0.12 : hot ? 1 : 0.8}
+            style={{ filter: hot ? "drop-shadow(0 0 4px rgba(255,138,61,0.7))" : undefined, transition: "opacity 120ms, stroke-width 120ms" }} />;
+        })}
+        {graph.map((p) => {
+          const n = pos[p.id]; if (!n) return null;
+          const c = strokeFor(p.bracket);
+          const isLit = lit.has(p.id);
+          const dim = hover !== null && !isLit;
+          return (
+            <g key={p.id} onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)} style={{ cursor: "pointer" }}>
+              <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={0}
+                fill={isLit ? c + "3a" : c + "1e"} stroke={c}
+                strokeWidth={isLit ? 1.8 : 1}
+                opacity={dim ? 0.35 : 1}
+                style={{ filter: hover === p.id ? `drop-shadow(0 0 6px ${c}aa)` : undefined, transition: "all 120ms" }} />
+              <text x={n.cx} y={n.y + 17} textAnchor="middle" fill="#dfe3ef" fontSize={8} opacity={dim ? 0.4 : 1}>{shortLabel(p.label)}</text>
+              <text x={n.cx} y={n.y + 33} textAnchor="middle" fill={c === "#7c5cff" ? "#a48fff" : c} fontSize={11} fontWeight={600} opacity={dim ? 0.4 : 1}>{pcOf(p)}×{psOf(p)}</text>
+            </g>
+          );
+        })}
       </svg>
-      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 9, color: "var(--cb-muted)" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#28d17c" strokeWidth={2} /></svg>advances</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><svg width={18} height={4}><line x1={0} y1={2} x2={18} y2={2} stroke="#ff8a3d" strokeWidth={2} strokeDasharray="4 3" /></svg>drops to losers</span>
+      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 10, color: "var(--cb-muted)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><svg width={20} height={4}><line x1={0} y1={2} x2={20} y2={2} stroke="#28d17c" strokeWidth={2.4} /></svg>advances</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><svg width={20} height={4}><line x1={0} y1={2} x2={20} y2={2} stroke="#ff8a3d" strokeWidth={2.4} strokeDasharray="4 3" /></svg>drops to losers</span>
       </div>
-      <div style={{ fontSize: 9, color: "var(--cb-muted)", opacity: 0.75, marginTop: 6, lineHeight: 1.4 }}>Teams fill in after you generate.</div>
+      <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-purple2)", opacity: 0.85, marginTop: 10, lineHeight: 1.5, letterSpacing: "0.03em" }}>▸ Hover a match to trace where its teams go.</div>
+      <div style={{ fontSize: 10, color: "var(--cb-muted)", opacity: 0.7, marginTop: 4, lineHeight: 1.4 }}>Teams fill in after you generate.</div>
     </div>
   );
 }
@@ -343,9 +381,9 @@ export default function Home() {
   const [invitesList, setInvitesList] = useState<{ code: string; note: string; usedBy: string | null; createdAt: string | null }[]>([]);
   const [invitesLoading, setInvitesLoading] = useState(false);
   const [newInviteNote, setNewInviteNote] = useState("");
-  const [previewWide, setPreviewWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1250);
+  const [previewWide, setPreviewWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1600);
   useEffect(() => {
-    const onResize = () => setPreviewWide(window.innerWidth >= 1250);
+    const onResize = () => setPreviewWide(window.innerWidth >= 1600);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -1344,8 +1382,8 @@ export default function Home() {
       {/* Setup Screen */}
       {screen === "setup" && (
         <div className="setup-screen">
-          {/* Top-right account / invites / back-to-tournament cluster */}
-          <div style={{ position: "fixed", top: 12, right: 16, zIndex: 600, display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Top-right account toolbar — grouped into one cohesive bar */}
+          <div style={{ position: "fixed", top: 12, right: 16, zIndex: 600, display: "flex", gap: 6, alignItems: "center", background: "rgba(13,15,20,0.92)", border: "1px solid var(--cb-border)", padding: "6px 8px", backdropFilter: "blur(8px)", boxShadow: "0 4px 16px rgba(0,0,0,0.45)" }}>
             <button className="cb-btn ghost" onClick={() => { navigator.clipboard.writeText("https://rauder999.github.io/codebreakers-bracket/live.html"); toast.success("Gallery link copied — shows all live tournaments"); }}>Gallery link</button>
             {pods.length > 0 && (
               <button className="cb-btn success" onClick={() => setScreen("bracket")}>← Back to tournament</button>
@@ -1354,20 +1392,30 @@ export default function Home() {
               <button className="cb-btn warn" onClick={() => { setShowInvites(true); fetchInvites(); }}>Invites</button>
             )}
             {adminToken ? (
-              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--cb-muted)" }}>
-                <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 11, letterSpacing: "0.08em", color: "var(--cb-purple2)" }}>{authKind === "master" ? "SUPER-ADMIN" : (authName || "Signed in")}</span>
-                <button className="cb-btn" style={{ padding: "3px 8px", fontSize: 10.5 }} onClick={logout}>Sign out</button>
+              <span style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 4, borderLeft: "1px solid var(--cb-border)" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: "var(--cb-font-mono)", fontSize: 10.5, letterSpacing: "0.08em", color: "var(--cb-purple2)" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--cb-green)", boxShadow: "0 0 5px var(--cb-green)" }} />
+                  {authKind === "master" ? "SUPER-ADMIN" : (authName || "SIGNED IN")}
+                </span>
+                <button className="cb-btn" style={{ padding: "4px 10px", fontSize: 10.5 }} onClick={logout}>Sign out</button>
               </span>
             ) : (
               <button className="cb-btn info" onClick={() => { pendingAction.current = null; setAuthMode("login"); setShowTokenDialog(true); }}>Sign in / Register</button>
             )}
           </div>
-          {/* Live bracket preview — wide screens only, updates as you change format */}
+          {/* Live bracket preview — a proper sidebar card, updates as you change format */}
           {previewWide && (
-            <div style={{ position: "fixed", top: 76, right: 24, width: 400, maxHeight: "78vh", overflowY: "auto", zIndex: 500, background: "rgba(13,15,20,0.96)", border: "1px solid var(--cb-border2)", padding: "16px 18px" }}>
-              <div style={{ fontFamily: "var(--cb-font-display)", fontSize: 12, fontWeight: 600, letterSpacing: "0.2em", color: "var(--cb-purple2)", textTransform: "uppercase" }}>Live Preview</div>
-              <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, color: "var(--cb-muted)", margin: "4px 0 10px" }}>{tournamentSize} teams · {tournamentMode === "double" ? "Double Elimination" : "Single Elimination"}</div>
-              <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
+            <div style={{ position: "fixed", top: 72, right: 24, width: 440, maxHeight: "84vh", overflowY: "auto", zIndex: 500, background: "linear-gradient(180deg, rgba(19,21,29,0.98), rgba(13,15,20,0.98))", border: "1px solid var(--cb-border2)", boxShadow: "0 12px 44px rgba(0,0,0,0.55), inset 0 1px 0 rgba(124,92,255,0.18)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px 10px", borderBottom: "1px solid var(--cb-border)" }}>
+                <div>
+                  <div style={{ fontFamily: "var(--cb-font-display)", fontSize: 13, fontWeight: 700, letterSpacing: "0.2em", color: "var(--cb-purple2)", textTransform: "uppercase" }}>Live Preview</div>
+                  <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, color: "var(--cb-muted)", marginTop: 3 }}>{tournamentSize} teams · {tournamentMode === "double" ? "Double Elimination" : "Single Elimination"}</div>
+                </div>
+                <span className="cb-chip" style={{ borderColor: "rgba(124,92,255,0.4)", color: "var(--cb-purple2)" }}>{globalFormat === 4 ? "CASH-OUT" : "FINAL RND"}</span>
+              </div>
+              <div style={{ padding: "16px 18px 18px" }}>
+                <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
+              </div>
             </div>
           )}
 

@@ -175,26 +175,27 @@
 /* ─── Match Pod ─── */
 .match-pod {
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.022), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.028), transparent 46%),
     var(--cb-panel);
-  border: 1px solid var(--cb-border2);
-  width: 240px;
+  border: 1px solid var(--cb-border);
+  width: 244px;
   flex-shrink: 0;
   position: relative;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035), 0 1px 3px rgba(0,0,0,0.45);
+  /* Elevation carries separation so we don't need bright outlines everywhere */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.045), 0 4px 16px rgba(0,0,0,0.55);
   transition: border-color var(--cb-t-hover) var(--cb-ease), box-shadow var(--cb-t-hover) var(--cb-ease), transform var(--cb-t-hover) var(--cb-ease);
 }
 
 /* Admin pods are clickable — lift on hover */
 .match-pod:hover {
   border-color: var(--cb-purple);
-  box-shadow: inset 0 1px 0 rgba(164,143,255,0.18), 0 10px 30px rgba(0,0,0,0.55), 0 0 0 1px rgba(124,92,255,0.22);
-  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(164,143,255,0.2), 0 12px 34px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,92,255,0.28);
+  transform: translateY(-2px);
 }
 
 .pod-header {
-  padding: 6px 11px;
-  border-bottom: 1px solid var(--cb-border2);
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--cb-border);
   font-family: var(--cb-font-mono);
   font-weight: 500;
   font-size: 9.5px;
@@ -262,17 +263,18 @@
 .team-row {
   display: flex;
   align-items: center;
-  padding: 8px 11px;
+  padding: 9px 12px;
   border-left: 3px solid transparent;
   cursor: pointer;
   transition: background var(--cb-t-state) var(--cb-ease), border-color var(--cb-t-state) var(--cb-ease), opacity var(--cb-t-state) var(--cb-ease);
   position: relative;
-  min-height: 36px;
-  gap: 8px;
+  min-height: 38px;
+  gap: 9px;
 }
 
+/* Faint internal divider — avoids the "grid of hard outlines" look */
 .team-row:not(:last-child) {
-  border-bottom: 1px solid var(--cb-border);
+  border-bottom: 1px solid rgba(255,255,255,0.045);
 }
 
 .team-row:hover {
@@ -893,15 +895,17 @@ details.adv .adv-inner { padding: 4px 16px 14px; display: flex; flex-direction: 
   color: var(--cb-gold) !important;
 }
 
-/* ─── LB Pod ─── */
+/* ─── LB Pod — neutral plate like WB; orange lives only in the header
+   label + a thin left tick, never as a full tint ─── */
 .lb-pod {
-  border-color: rgba(255,138,61,0.35) !important;
+  border-color: var(--cb-border) !important;
 }
 
 .lb-header {
   color: var(--cb-orange) !important;
-  background: rgba(255,138,61,0.05) !important;
-  border-bottom-color: rgba(255,138,61,0.2) !important;
+  background: linear-gradient(180deg, var(--cb-panel3), var(--cb-panel2)) !important;
+  border-bottom-color: var(--cb-border) !important;
+  box-shadow: inset 2px 0 0 var(--cb-orange);
 }
 
 /* ── DROP -> LB: orange, physical "falls down" motion ── */
