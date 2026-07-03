@@ -174,24 +174,34 @@
 
 /* ─── Match Pod ─── */
 .match-pod {
-  background: var(--cb-panel);
-  border: 1px solid var(--cb-border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.022), transparent 42%),
+    var(--cb-panel);
+  border: 1px solid var(--cb-border2);
   width: 240px;
   flex-shrink: 0;
   position: relative;
-  transition: border-color var(--cb-t-hover) var(--cb-ease), box-shadow var(--cb-t-hover) var(--cb-ease);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035), 0 1px 3px rgba(0,0,0,0.45);
+  transition: border-color var(--cb-t-hover) var(--cb-ease), box-shadow var(--cb-t-hover) var(--cb-ease), transform var(--cb-t-hover) var(--cb-ease);
+}
+
+/* Admin pods are clickable — lift on hover */
+.match-pod:hover {
+  border-color: var(--cb-purple);
+  box-shadow: inset 0 1px 0 rgba(164,143,255,0.18), 0 10px 30px rgba(0,0,0,0.55), 0 0 0 1px rgba(124,92,255,0.22);
+  transform: translateY(-1px);
 }
 
 .pod-header {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--cb-border);
+  padding: 6px 11px;
+  border-bottom: 1px solid var(--cb-border2);
   font-family: var(--cb-font-mono);
   font-weight: 500;
   font-size: 9.5px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--cb-muted);
-  background: var(--cb-panel2);
+  color: var(--cb-silver);
+  background: linear-gradient(180deg, var(--cb-panel3), var(--cb-panel2));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -252,13 +262,13 @@
 .team-row {
   display: flex;
   align-items: center;
-  padding: 7px 10px;
+  padding: 8px 11px;
   border-left: 3px solid transparent;
   cursor: pointer;
   transition: background var(--cb-t-state) var(--cb-ease), border-color var(--cb-t-state) var(--cb-ease), opacity var(--cb-t-state) var(--cb-ease);
   position: relative;
-  min-height: 34px;
-  gap: 6px;
+  min-height: 36px;
+  gap: 8px;
 }
 
 .team-row:not(:last-child) {
@@ -273,16 +283,20 @@
   background: rgba(255,255,255,0.07);
 }
 
-/* ── ADVANCE: green sweep, settles into inset border ── */
+/* ── ADVANCE: green sweep, settles into inset border; winner reads dominant ── */
 .team-row.advancing {
   border-left-color: var(--cb-green);
-  background: rgba(40,209,124,0.05);
+  background: linear-gradient(90deg, rgba(40,209,124,0.10), rgba(40,209,124,0.03) 55%, transparent);
   animation: advSweep 1100ms var(--cb-ease) both;
+}
+.team-row.advancing .team-name {
+  color: #f4f7ff;
+  font-weight: 700;
 }
 @keyframes advSweep {
   0%   { background: rgba(40,209,124,0); }
-  30%  { background: rgba(40,209,124,0.18); }
-  100% { background: rgba(40,209,124,0.05); }
+  30%  { background: rgba(40,209,124,0.20); }
+  100% { background: linear-gradient(90deg, rgba(40,209,124,0.10), rgba(40,209,124,0.03) 55%, transparent); }
 }
 
 /* ── ELIMINATED: dim + strikethrough ── */
@@ -299,7 +313,10 @@
 /* ── CHAMPION: gold ── */
 .team-row.champion {
   border-left-color: var(--cb-gold);
-  background: rgba(232,182,74,0.06);
+  background: linear-gradient(90deg, rgba(232,182,74,0.12), rgba(232,182,74,0.03) 55%, transparent);
+}
+.team-row.champion .team-name {
+  font-weight: 700;
 }
 
 .team-emoji {
@@ -332,25 +349,42 @@
   color: var(--cb-muted);
 }
 
+/* Clean mono chip instead of "[1st]" bracket text */
 .placement-badge {
   font-family: var(--cb-font-mono);
   font-weight: 500;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--cb-muted);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   flex-shrink: 0;
   white-space: nowrap;
-  min-width: 36px;
-  text-align: right;
+  padding: 2px 6px;
+  border: 1px solid var(--cb-border2);
+  background: rgba(255,255,255,0.02);
   animation: badgeIn 150ms var(--cb-ease) both;
 }
 
 .team-row.advancing .placement-badge {
   color: var(--cb-green);
+  border-color: rgba(40,209,124,0.4);
+  background: rgba(40,209,124,0.08);
+}
+
+.team-row.dropping .placement-badge {
+  color: var(--cb-orange);
+  border-color: rgba(255,138,61,0.4);
+  background: rgba(255,138,61,0.08);
+}
+
+.team-row.eliminated .placement-badge {
+  border-color: var(--cb-border);
 }
 
 .team-row.champion .placement-badge {
   color: var(--cb-gold);
+  border-color: rgba(232,182,74,0.4);
+  background: rgba(232,182,74,0.08);
 }
 
 @keyframes badgeIn {
@@ -729,7 +763,9 @@ details.adv .adv-inner { padding: 4px 16px 14px; display: flex; flex-direction: 
 /* ─── Double Elimination Layout ─── */
 .de-bracket-wrapper {
   display: grid;
-  grid-template-columns: max-content auto;
+  /* GF column hugs its content (max-content) instead of stretching (auto),
+     so the Grand Final sits right after the brackets — no dead centre gap. */
+  grid-template-columns: max-content max-content;
   grid-template-rows: auto auto auto;
   /* row 1 = WB, row 2 = divider, row 3 = LB */
   width: max-content;
@@ -871,20 +907,17 @@ details.adv .adv-inner { padding: 4px 16px 14px; display: flex; flex-direction: 
 /* ── DROP -> LB: orange, physical "falls down" motion ── */
 .team-row.dropping {
   border-left-color: var(--cb-orange);
-  background: rgba(255,138,61,0.05);
+  background: linear-gradient(90deg, rgba(255,138,61,0.09), rgba(255,138,61,0.03) 55%, transparent);
   animation: dropSlide 1200ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 .team-row.dropping .team-name {
-  color: var(--cb-orange);
-}
-.team-row.dropping .placement-badge {
   color: var(--cb-orange);
 }
 @keyframes dropSlide {
   0%   { background: rgba(255,138,61,0); transform: none; }
   35%  { background: rgba(255,138,61,0.16); }
   70%  { transform: translateY(3px); }
-  100% { background: rgba(255,138,61,0.05); transform: none; }
+  100% { background: linear-gradient(90deg, rgba(255,138,61,0.09), rgba(255,138,61,0.03) 55%, transparent); transform: none; }
 }
 
 /* ─── Path badges [WB] / [LB] in Grand Final ─── */
@@ -1302,27 +1335,37 @@ body.screenshot-mode .bracket-container {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 4px 10px;
-  background: rgba(124,92,255,0.06);
-  border-bottom: 1px solid rgba(124,92,255,0.18);
+  background: rgba(124,92,255,0.045);
+  border-bottom: 1px solid var(--cb-border);
   cursor: pointer;
   transition: background 120ms;
-  min-height: 22px;
+  min-height: 21px;
+}
+.map-plate::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--cb-purple);
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 .map-plate:hover {
-  background: rgba(124,92,255,0.14);
+  background: rgba(124,92,255,0.12);
 }
 .map-name {
   font-family: var(--cb-font-mono);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--cb-purple2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
+  max-width: 150px;
 }
 
 /* ─── Format Panel ───────────────────────────────────────────────────────────── */

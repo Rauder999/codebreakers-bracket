@@ -1611,8 +1611,9 @@ export default function Home() {
           <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0, overflow: "visible" }}>
             {connectors.map((c) => {
               const color = c.isDrop ? (c.active ? "#ff8a3d" : "#2b1c10") : (c.active ? "#28d17c" : "#20242f");
-              const strokeWidth = c.active ? 1.6 : 1;
+              const strokeWidth = c.active ? 2 : 1;
               const dashArray = c.isDrop ? "4,5" : undefined;
+              const glow = c.active ? `drop-shadow(0 0 3px ${c.isDrop ? "rgba(255,138,61,0.4)" : "rgba(40,209,124,0.4)"})` : undefined;
               // Orthogonal route: out from source -> vertical in a dedicated channel -> into dest.
               // The corridor (cx) may sit to the right of BOTH endpoints (stacked finals),
               // so the approach into dest can come from the right. Allow cx beyond x2.
@@ -1632,6 +1633,7 @@ export default function Home() {
                 <path key={c.key} d={d}
                   stroke={color} strokeWidth={strokeWidth} strokeDasharray={dashArray}
                   fill="none" strokeLinejoin="round" strokeLinecap="round"
+                  style={{ filter: glow }}
                   opacity={c.active ? 1 : 0.4} />
               );
             })}
@@ -2118,7 +2120,7 @@ function MatchPod({ pod, isGF, isDE, isLB, onTeamClick, onMapClick, onStreamTogg
         else if (isDropping) rowClass += " dropping";
         else if (isEliminated) rowClass += " eliminated";
 
-        const placementLabel = team.placement !== 0 ? `[${PLACEMENT_LABELS[team.placement as Placement]}]` : "";
+        const placementLabel = team.placement !== 0 ? PLACEMENT_LABELS[team.placement as Placement] : "";
 
         return (
           <div key={ti} className={rowClass} onClick={() => !isEmpty && onTeamClick(pod.id, ti)} title={isEmpty ? "" : "Click to set result"}>
