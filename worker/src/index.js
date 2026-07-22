@@ -246,13 +246,20 @@ export default {
       const iat = Date.now();
       const state = await signToken({ kind: "dstate", ret, iat, exp: iat + 10 * 60 * 1000 }, env.AUTH_SECRET);
       const redirectUri = `${url.origin}/discord/callback`;
-      const auth = new URL("https://discord.com/oauth2/authorize");
-      auth.searchParams.set("client_id", env.DISCORD_CLIENT_ID);
-      auth.searchParams.set("response_type", "code");
-      auth.searchParams.set("redirect_uri", redirectUri);
-      auth.searchParams.set("scope", "identify");
-      auth.searchParams.set("state", state);
-      return Response.redirect(auth.toString(), 302);
+      const q = new URLSearchParams({
+        client_id: env.DISCORD_CLIENT_ID,
+        response_type: "code",
+        redirect_uri: redirectUri,
+        scope: "identify",
+        state,
+      }).toString();
+      // mode=app: deep-link into the installed Discord client, where players are
+      // already logged in. After approval Discord opens the callback in the
+      // system browser. The web flow stays as fallback.
+      if (url.searchParams.get("mode") === "app") {
+        return new Response(null, { status: 302, headers: { Location: `discord://-/oauth2/authorize?${q}`, ...CORS } });
+      }
+      return Response.redirect(`https://discord.com/oauth2/authorize?${q}`, 302);
     }
 
     if (path === "/discord/callback" && method === "GET") {

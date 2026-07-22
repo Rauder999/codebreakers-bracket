@@ -1105,7 +1105,18 @@
     }
     function discordSignIn() {
       const ret = window.location.origin + window.location.pathname + window.location.search;
-      window.location.href = `${WORKER_URL}/discord/login?return=${encodeURIComponent(ret)}`;
+      const enc = encodeURIComponent(ret);
+      const appUrl = `${WORKER_URL}/discord/login?mode=app&return=${enc}`;
+      const webUrl = `${WORKER_URL}/discord/login?return=${enc}`;
+      // Try the installed Discord app first — players are already logged in
+      // there. If nothing picks up the deep link, fall back to the web flow.
+      const fallback = setTimeout(() => { window.location.href = webUrl; }, 2200);
+      const cancel = () => clearTimeout(fallback);
+      window.addEventListener("pagehide", cancel, { once: true });
+      document.addEventListener("visibilitychange", function onVis() {
+        if (document.hidden) { cancel(); document.removeEventListener("visibilitychange", onVis); }
+      });
+      window.location.href = appUrl;
     }
     function discordSignOut() {
       localStorage.removeItem("cb_discord_token");
