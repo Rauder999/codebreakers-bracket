@@ -1,8 +1,8 @@
-name = "operator-api-rt"
+name = "codebreakers-api"
 main = "src/index.js"
 compatibility_date = "2025-05-01"
 
-# Same KV namespace as the current worker (published bracket + active-sessions index).
+# Same KV namespace as before the rename (accounts, invites, archives, session index).
 kv_namespaces = [
   { binding = "OPERATOR_KV", id = "c3ed0a2d65ab421eaaf09e15fcce7f83" }
 ]
@@ -15,3 +15,9 @@ class_name = "SessionRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SessionRoom"]
+
+# Discord OAuth application (chat login on live.html).
+# DISCORD_CLIENT_SECRET is a secret: `npx wrangler secret put DISCORD_CLIENT_SECRET`
+# NOTE: [vars] must stay last — top-level keys after it would be swallowed into the table.
+[vars]
+DISCORD_CLIENT_ID = ""

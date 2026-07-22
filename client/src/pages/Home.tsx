@@ -153,18 +153,19 @@ function parseCsv(text: string): string[][] {
 }
 
 function seedsFromImport(
-  rows: string[][], nameCol: number, strengthCol: number, playerCols: number[], size: Size
+  rows: string[][], nameCol: number, strengthCol: number, playerCols: number[], discordCols: number[], size: Size
 ): SeedEntry[] {
   const teams = rows.slice(1).map(r => ({
     name: (r[nameCol] || "").trim(),
     strength: parseFloat(r[strengthCol]) || 0,
     players: playerCols.map(c => (r[c] || "").trim()).filter(Boolean),
+    discords: discordCols.map(c => (r[c] || "").trim()).filter(Boolean),
   })).filter(t => t.name);
   teams.sort((a, b) => b.strength - a.strength);
-  const result = teams.slice(0, size).map((t, i) => ({ name: t.name, seed: i + 1, players: t.players }));
+  const result = teams.slice(0, size).map((t, i) => ({ name: t.name, seed: i + 1, players: t.players, discords: t.discords }));
   if (teams.length < size) {
     const pad = size - teams.length;
-    for (let i = 0; i < pad; i++) result.push({ name: `TBD ${i + 1}`, seed: result.length + 1, players: [] });
+    for (let i = 0; i < pad; i++) result.push({ name: `TBD ${i + 1}`, seed: result.length + 1, players: [], discords: [] });
     toast.warning(`Only ${teams.length} teams found - padded ${pad} TBD slots`);
   } else if (teams.length > size) {
     toast.warning(`${teams.length} teams found - top ${size} by strength selected`);
@@ -320,6 +321,7 @@ export default function Home() {
   const [csvNameCol, setCsvNameCol] = useState(0);
   const [csvStrengthCol, setCsvStrengthCol] = useState(1);
   const [csvPlayerCols, setCsvPlayerCols] = useState<number[]>([]);
+  const [csvDiscordCols, setCsvDiscordCols] = useState<number[]>([]);
   const csvFileRef = useRef<HTMLInputElement>(null);
 
   // Undo / Redo
@@ -334,7 +336,7 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false);
 
   // Publish
-  const WORKER_URL = "https://operator-api-rt.taksatovq.workers.dev";
+  const WORKER_URL = "https://codebreakers-api.codebreakerstf.workers.dev";
   const WS_URL = WORKER_URL.replace(/^http/, "ws");
   const [isLive, setIsLive] = useState(false);
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
@@ -1219,7 +1221,7 @@ export default function Home() {
 
   const handleCsvApply = () => {
     if (!csvRows) return;
-    const newSeeds = seedsFromImport(csvRows, csvNameCol, csvStrengthCol, csvPlayerCols, tournamentSize);
+    const newSeeds = seedsFromImport(csvRows, csvNameCol, csvStrengthCol, csvPlayerCols, csvDiscordCols, tournamentSize);
     setSeeds(newSeeds);
     setShowCsvPanel(false);
     toast.success(`Imported ${newSeeds.filter(s => !s.name.startsWith("TBD")).length} teams`);
@@ -1579,6 +1581,17 @@ export default function Home() {
                       }}
                       style={{ opacity: 0.75 }}
                     />
+                    <input
+                      className="team-input players-input"
+                      type="text"
+                      value={(entry.discords ?? []).join(", ")}
+                      placeholder="Discords: user1, user2... (chat access)"
+                      onChange={(e) => {
+                        const discords = e.target.value.split(",").map((p) => p.trim()).filter(Boolean);
+                        setSeeds((prev) => prev.map((s, si) => si === i ? { ...s, discords } : s));
+                      }}
+                      style={{ opacity: 0.6 }}
+                    />
                   </div>
                 </div>
               ))}
@@ -1633,6 +1646,24 @@ export default function Home() {
                                 setCsvPlayerCols(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i));
                               }}
                               style={{ accentColor: "var(--cb-purple)" }}
+                            />
+                            {h || `Col ${i}`}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="csv-mapping-row" style={{ alignItems: "flex-start" }}>
+                      <span className="csv-mapping-label" style={{ paddingTop: 4 }}>Player Discords</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {csvRows[0].map((h, i) => (
+                          <label key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--cb-muted)", cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={csvDiscordCols.includes(i)}
+                              onChange={e => {
+                                setCsvDiscordCols(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i));
+                              }}
+                              style={{ accentColor: "var(--cb-cyan)" }}
                             />
                             {h || `Col ${i}`}
                           </label>

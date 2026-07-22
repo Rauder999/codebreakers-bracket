@@ -39,6 +39,7 @@ export interface SeedEntry {
   name: string;
   seed: number;
   players: string[];
+  discords?: string[]; // Discord usernames of the roster (chat access on live.html)
 }
 
 // A phase is a logical round. Pods are generated from it based on podSize.

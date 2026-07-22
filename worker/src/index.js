@@ -84,7 +84,13 @@ async function resolveIdentity(tokenStr, env) {
   if (!p) return { kind: "none" };
   if (p.kind === "account") return { kind: "account", accountId: p.sub, name: p.name };
   if (p.kind === "cohost") return { kind: "cohost", code: p.code, name: p.name || "Co-host" };
+  if (p.kind === "discord") return { kind: "discord", discordId: p.sub, uname: p.uname, name: p.name || p.uname, avatar: p.avatar || null };
   return { kind: "none" };
+}
+
+// Normalize a Discord handle for roster matching: lowercase, no @, no #discriminator.
+function normDiscord(s) {
+  return String(s || "").toLowerCase().trim().replace(/^@/, "").split("#")[0];
 }
 function canWrite(idn, owner, code) {
   if (idn.kind === "master") return true;
@@ -225,6 +231,71 @@ export default {
       const iat = Date.now();
       const token = await signToken({ kind: "cohost", code, name: "Co-host", iat, exp: iat + COHOST_TOKEN_TTL }, env.AUTH_SECRET);
       return json({ ok: true, code, token });
+    }
+
+    // ── Discord OAuth (player identity for match chats) ────────────────────
+    // GET /discord/login?return=<url>  -> 302 to Discord authorize
+    // GET /discord/callback            -> exchange code, 302 back with #discord=<token>
+    // GET /discord/me                  -> whoami for the chat UI
+    const DISCORD_RETURN_OK = (u) => u.startsWith("https://rauder999.github.io/") || u.startsWith("http://localhost");
+
+    if (path === "/discord/login" && method === "GET") {
+      if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET) return json({ ok: false, error: "Discord login is not configured yet" }, 503);
+      const ret = url.searchParams.get("return") || "";
+      if (!DISCORD_RETURN_OK(ret)) return json({ ok: false, error: "Invalid return URL" }, 400);
+      const iat = Date.now();
+      const state = await signToken({ kind: "dstate", ret, iat, exp: iat + 10 * 60 * 1000 }, env.AUTH_SECRET);
+      const redirectUri = `${url.origin}/discord/callback`;
+      const auth = new URL("https://discord.com/oauth2/authorize");
+      auth.searchParams.set("client_id", env.DISCORD_CLIENT_ID);
+      auth.searchParams.set("response_type", "code");
+      auth.searchParams.set("redirect_uri", redirectUri);
+      auth.searchParams.set("scope", "identify");
+      auth.searchParams.set("state", state);
+      auth.searchParams.set("prompt", "none");
+      return Response.redirect(auth.toString(), 302);
+    }
+
+    if (path === "/discord/callback" && method === "GET") {
+      const code = url.searchParams.get("code");
+      const stateStr = url.searchParams.get("state");
+      const st = await verifyToken(stateStr, env.AUTH_SECRET);
+      if (!st || st.kind !== "dstate" || !DISCORD_RETURN_OK(st.ret)) return json({ ok: false, error: "Bad state" }, 400);
+      if (!code) return Response.redirect(`${st.ret}#discord_error=denied`, 302);
+      const redirectUri = `${url.origin}/discord/callback`;
+      const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: env.DISCORD_CLIENT_ID,
+          client_secret: env.DISCORD_CLIENT_SECRET,
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+        }),
+      });
+      if (!tokenRes.ok) return Response.redirect(`${st.ret}#discord_error=exchange`, 302);
+      const tok = await tokenRes.json();
+      const meRes = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: `Bearer ${tok.access_token}` } });
+      if (!meRes.ok) return Response.redirect(`${st.ret}#discord_error=me`, 302);
+      const me = await meRes.json();
+      const iat = Date.now();
+      const token = await signToken({
+        kind: "discord",
+        sub: me.id,
+        uname: String(me.username || "").toLowerCase(),
+        name: me.global_name || me.username,
+        avatar: me.avatar || null,
+        iat,
+        exp: iat + 30 * 24 * 60 * 60 * 1000,
+      }, env.AUTH_SECRET);
+      return Response.redirect(`${st.ret}#discord=${encodeURIComponent(token)}`, 302);
+    }
+
+    if (path === "/discord/me" && method === "GET") {
+      const idn = await resolveIdentity(bearer(request), env);
+      if (idn.kind !== "discord") return json({ ok: false }, 401);
+      return json({ ok: true, discordId: idn.discordId, uname: idn.uname, name: idn.name, avatar: idn.avatar });
     }
 
     // ── Archives: frozen snapshots of finished tournaments ─────────────────
@@ -372,7 +443,12 @@ export class SessionRoom {
       const pair = new WebSocketPair();
       const client = pair[0], server = pair[1];
       this.state.acceptWebSocket(server);
-      server.serializeAttachment({ canWrite: write, editor, code, accountId: idn.accountId || null, idnKind: idn.kind });
+      server.serializeAttachment({
+        canWrite: write, editor, code, accountId: idn.accountId || null, idnKind: idn.kind,
+        discordId: idn.kind === "discord" ? idn.discordId : null,
+        uname: idn.kind === "discord" ? idn.uname : null,
+        dname: idn.kind === "discord" ? idn.name : null,
+      });
 
       if (this._doc) server.send(JSON.stringify({ t: "state", state: this._doc.state, version: this._doc.version, lastEditor: this._doc.lastEditor }));
       else server.send(JSON.stringify({ t: "empty" }));
@@ -459,6 +535,111 @@ export class SessionRoom {
     return true;
   }
 
+  // ─── Match chat (private: block participants + admins only) ───────────────
+  parseStateDoc() {
+    if (!this._doc) return null;
+    try { return JSON.parse(this._doc.state); } catch { return null; }
+  }
+
+  // Pod ids this attachment may chat in. Admin-ish sockets (canWrite) see all.
+  chatPods(att, s) {
+    if (att.canWrite) return "all";
+    if (!att.uname && !att.discordId) return new Set();
+    if (!s || !Array.isArray(s.pods)) return new Set();
+    const teamNames = new Set();
+    for (const seed of (s.seeds || [])) {
+      const list = seed.discords || [];
+      const hit = list.some((d) => normDiscord(d) === att.uname || String(d).trim() === att.discordId);
+      if (hit && seed.name) teamNames.add(seed.name);
+    }
+    const pods = new Set();
+    if (teamNames.size === 0) return pods;
+    for (const p of s.pods) {
+      if (p.teams && p.teams.some((t) => t.name && teamNames.has(t.name))) pods.add(p.id);
+    }
+    return pods;
+  }
+
+  chatAllowed(att, podId, s) {
+    const pods = this.chatPods(att, s);
+    return pods === "all" || pods.has(podId);
+  }
+
+  async chatHistory(podId) {
+    return (await this.state.storage.get(`chat:${podId}`)) || [];
+  }
+
+  broadcastChat(podId, payload) {
+    const s = this.parseStateDoc();
+    const msg = JSON.stringify(payload);
+    for (const ws of this.state.getWebSockets()) {
+      try {
+        const att = (ws.deserializeAttachment && ws.deserializeAttachment()) || {};
+        if (this.chatAllowed(att, podId, s)) ws.send(msg);
+      } catch { /* ignore */ }
+    }
+  }
+
+  async handleChatMessage(ws, att, data) {
+    const s = this.parseStateDoc();
+
+    if (data.t === "chat-access") {
+      const pods = this.chatPods(att, s);
+      ws.send(JSON.stringify({ t: "chat-access", admin: pods === "all", pods: pods === "all" ? [] : [...pods] }));
+      return;
+    }
+
+    const podId = String(data.podId || "");
+    if (!podId || !this.chatAllowed(att, podId, s)) {
+      ws.send(JSON.stringify({ t: "chat-denied", podId }));
+      return;
+    }
+
+    if (data.t === "chat-open") {
+      const messages = await this.chatHistory(podId);
+      ws.send(JSON.stringify({ t: "chat-history", podId, messages }));
+      return;
+    }
+
+    if (data.t === "chat-send") {
+      const text = String(data.text || "").trim().slice(0, 400);
+      if (!text) return;
+      // Light rate limit: 1 message per 700ms per socket.
+      this._lastChatAt = this._lastChatAt || new Map();
+      const last = this._lastChatAt.get(ws) || 0;
+      const now = Date.now();
+      if (now - last < 700) return;
+      this._lastChatAt.set(ws, now);
+      const isAdmin = !!att.canWrite;
+      const msg = {
+        id: b64url(randBytes(9)),
+        ts: now,
+        text,
+        name: isAdmin ? (att.editor || "Admin") : (att.dname || att.uname || "Player"),
+        uname: att.uname || null,
+        admin: isAdmin,
+      };
+      const list = await this.chatHistory(podId);
+      list.push(msg);
+      while (list.length > 300) list.shift();
+      await this.state.storage.put(`chat:${podId}`, list);
+      this.broadcastChat(podId, { t: "chat-msg", podId, msg });
+      return;
+    }
+
+    if (data.t === "chat-delete") {
+      if (!att.canWrite) { ws.send(JSON.stringify({ t: "chat-denied", podId })); return; }
+      const msgId = String(data.msgId || "");
+      const list = await this.chatHistory(podId);
+      const next = list.filter((m) => m.id !== msgId);
+      if (next.length !== list.length) {
+        await this.state.storage.put(`chat:${podId}`, next);
+        this.broadcastChat(podId, { t: "chat-del", podId, msgId });
+      }
+      return;
+    }
+  }
+
   async webSocketMessage(ws, message) {
     let data;
     try { data = JSON.parse(message); } catch { return; }
@@ -466,6 +647,11 @@ export class SessionRoom {
     await this.loadDoc();
 
     if (data.t === "hello") return;
+    // Chat runs before the read-only guard: participants can chat but not edit the bracket.
+    if (data.t === "chat-access" || data.t === "chat-open" || data.t === "chat-send" || data.t === "chat-delete") {
+      try { await this.handleChatMessage(ws, att, data); } catch { /* ignore */ }
+      return;
+    }
     if (!att.canWrite) { try { ws.send(JSON.stringify({ t: "error", error: "read-only" })); } catch { /* ignore */ } return; }
     await this.ensureCode(att.code);
 
