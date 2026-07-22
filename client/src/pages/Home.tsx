@@ -386,6 +386,10 @@ export default function Home() {
   // Archive (frozen snapshot of a finished tournament)
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  // Raw text of roster inputs while focused — otherwise the controlled value
+  // re-parses on every keystroke and eats trailing commas/spaces.
+  const [rosterDrafts, setRosterDrafts] = useState<Record<string, string>>({});
+  const clearRosterDraft = (key: string) => setRosterDrafts((prev) => { const next = { ...prev }; delete next[key]; return next; });
   const [previewWide, setPreviewWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1600);
   useEffect(() => {
     const onResize = () => setPreviewWide(window.innerWidth >= 1600);
@@ -1573,23 +1577,29 @@ export default function Home() {
                     <input
                       className="team-input players-input"
                       type="text"
-                      value={(entry.players ?? []).join(", ")}
+                      value={rosterDrafts[`p${i}`] ?? (entry.players ?? []).join(", ")}
                       placeholder="Players: Player1, Player2, Player3..."
                       onChange={(e) => {
-                        const players = e.target.value.split(",").map((p) => p.trim()).filter(Boolean);
+                        const raw = e.target.value;
+                        setRosterDrafts((prev) => ({ ...prev, [`p${i}`]: raw }));
+                        const players = raw.split(",").map((p) => p.trim()).filter(Boolean);
                         setSeeds((prev) => prev.map((s, si) => si === i ? { ...s, players } : s));
                       }}
+                      onBlur={() => clearRosterDraft(`p${i}`)}
                       style={{ opacity: 0.75 }}
                     />
                     <input
                       className="team-input players-input"
                       type="text"
-                      value={(entry.discords ?? []).join(", ")}
+                      value={rosterDrafts[`d${i}`] ?? (entry.discords ?? []).join(", ")}
                       placeholder="Discords: user1, user2... (chat access)"
                       onChange={(e) => {
-                        const discords = e.target.value.split(",").map((p) => p.trim()).filter(Boolean);
+                        const raw = e.target.value;
+                        setRosterDrafts((prev) => ({ ...prev, [`d${i}`]: raw }));
+                        const discords = raw.split(",").map((p) => p.trim()).filter(Boolean);
                         setSeeds((prev) => prev.map((s, si) => si === i ? { ...s, discords } : s));
                       }}
+                      onBlur={() => clearRosterDraft(`d${i}`)}
                       style={{ opacity: 0.6 }}
                     />
                   </div>
