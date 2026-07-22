@@ -28,7 +28,8 @@
 
 import { propagate, getPhaseGraph } from "../../client/src/lib/bracketEngine";
 
-const ADMIN_TOKEN = "operator-2026-pasha"; // super-admin master (mint invites + legacy)
+// Super-admin master password lives in the ADMIN_TOKEN secret
+// (`npx wrangler secret put ADMIN_TOKEN`) — never hardcode it: this repo is public.
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const ACCOUNT_TOKEN_TTL = 365 * 24 * 60 * 60 * 1000;
 const COHOST_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -79,7 +80,7 @@ async function verifyToken(token, secret) {
 // Resolve a token string into an identity. Master token wins; else verify JWT-ish.
 async function resolveIdentity(tokenStr, env) {
   if (!tokenStr) return { kind: "none" };
-  if (tokenStr === ADMIN_TOKEN) return { kind: "master", accountId: "operator", name: "Operator" };
+  if (env.ADMIN_TOKEN && tokenStr === env.ADMIN_TOKEN) return { kind: "master", accountId: "operator", name: "Operator" };
   const p = await verifyToken(tokenStr, env.AUTH_SECRET);
   if (!p) return { kind: "none" };
   if (p.kind === "account") return { kind: "account", accountId: p.sub, name: p.name };
@@ -171,7 +172,7 @@ export default {
 
     // ── Invites (super-admin only) ─────────────────────────────────────────
     if (path === "/invites") {
-      if (bearer(request) !== ADMIN_TOKEN) return json({ ok: false, error: "Unauthorized" }, 401);
+      if (!env.ADMIN_TOKEN || bearer(request) !== env.ADMIN_TOKEN) return json({ ok: false, error: "Unauthorized" }, 401);
       if (method === "POST") {
         let body = {}; try { body = await request.json(); } catch { /* optional */ }
         const code = makeCode("INV-");
