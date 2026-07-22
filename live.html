@@ -502,17 +502,45 @@
     }
     .chat-close { background: none; border: none; color: var(--cb-muted); cursor: pointer; font-size: 16px; line-height: 1; }
     .chat-close:hover { color: var(--cb-text); }
-    .chat-msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+    .chat-msgs { flex: 1; overflow-y: auto; padding: 12px 12px 12px 10px; display: flex; flex-direction: column; }
     .chat-empty { color: var(--cb-muted); font-size: 12px; text-align: center; padding: 24px 8px; }
-    .chat-msg { font-size: 12.5px; line-height: 1.45; position: relative; padding-right: 16px; }
-    .chat-msg .m-head { display: flex; gap: 7px; align-items: baseline; }
-    .chat-msg .m-name { font-weight: 600; color: var(--cb-purple2); font-size: 12px; }
+    .chat-msg { display: flex; gap: 9px; font-size: 13px; line-height: 1.45; position: relative; padding: 3px 16px 3px 4px; margin-top: 10px; }
+    .chat-msg.grouped { margin-top: 0; }
+    .chat-msg:hover { background: rgba(255,255,255,0.025); }
+    .chat-avatar {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; overflow: hidden;
+      background: var(--cb-panel2); border: 1px solid var(--cb-border2);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; color: var(--cb-purple2);
+    }
+    .chat-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .chat-msg.admin .chat-avatar { border-color: var(--cb-gold); color: var(--cb-gold); }
+    .chat-msg.grouped .chat-avatar { visibility: hidden; height: 0; }
+    .chat-body { flex: 1; min-width: 0; }
+    .chat-msg .m-head { display: flex; gap: 7px; align-items: baseline; margin-bottom: 1px; }
+    .chat-msg.grouped .m-head { display: none; }
+    .chat-msg .m-name { font-weight: 600; color: var(--cb-purple2); font-size: 12.5px; }
     .chat-msg.admin .m-name { color: var(--cb-gold); }
+    .chat-msg .m-badge {
+      font-family: var(--fm); font-size: 8.5px; font-weight: 600; letter-spacing: 0.1em;
+      color: var(--cb-gold); border: 1px solid rgba(232,182,74,0.5); padding: 0 4px; text-transform: uppercase;
+    }
     .chat-msg .m-time { font-family: var(--fm); font-size: 9.5px; color: var(--cb-muted); }
     .chat-msg .m-text { color: var(--cb-text); word-break: break-word; white-space: pre-wrap; }
-    .chat-del { position: absolute; right: 0; top: 0; background: none; border: none; color: var(--cb-red); cursor: pointer; font-size: 12px; line-height: 1; display: none; opacity: 0.7; }
+    .chat-msg.deleted { margin-top: 4px; }
+    .chat-msg.deleted .m-text { color: var(--cb-muted); font-style: italic; font-size: 12px; }
+    .chat-del { position: absolute; right: 2px; top: 2px; background: none; border: none; color: var(--cb-red); cursor: pointer; font-size: 12px; line-height: 1; display: none; opacity: 0.55; }
     .chat-del:hover { opacity: 1; }
-    body.chat-admin .chat-del { display: block; }
+    body.chat-admin .chat-msg:not(.deleted):hover .chat-del { display: block; }
+    .chat-unread {
+      position: absolute; top: -4px; right: -4px; width: 9px; height: 9px; border-radius: 50%;
+      background: var(--cb-red); box-shadow: 0 0 5px rgba(255,77,94,0.8);
+    }
+    .chat-toast {
+      position: fixed; bottom: 18px; right: 18px; z-index: 1300;
+      background: var(--cb-panel2); border: 1px solid var(--cb-red); color: var(--cb-text);
+      font-size: 12px; padding: 9px 14px; box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+    }
     .chat-input-row { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--cb-border); }
     .chat-input {
       flex: 1; background: var(--cb-bg); border: 1px solid var(--cb-border2); color: var(--cb-text);
@@ -898,6 +926,7 @@
     function onChatAccess(data) {
       chatIsAdmin = !!data.admin;
       chatPodSet = new Set(data.pods || []);
+      if (!chatIsAdmin) { for (const podId of [...chatUnread.keys()]) { if (!chatPodSet.has(podId)) chatUnread.delete(podId); } }
       document.body.classList.toggle("chat-admin", chatIsAdmin);
       updateChatButtons();
       renderChatIdentity();
@@ -911,6 +940,11 @@
       const el = document.querySelector(`[data-pod-id="${podId}"] .pod-header`);
       return el ? el.textContent.trim() : "MATCH CHAT";
     }
+    const chatUnread = new Map();     // podId -> count of unseen messages
+    const chatPending = new Map();    // nonce -> { timer, text }
+    let lastRenderedMsg = null;       // { uname, admin, ts } for Discord-style grouping
+    const CHAT_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z"/></svg>`;
+
     function updateChatButtons() {
       document.querySelectorAll(".pod-chat-btn").forEach((b) => b.remove());
       if (currentArchive) return; // archives are frozen — no chat
@@ -919,14 +953,24 @@
         if (!(chatIsAdmin || chatPodSet.has(podId))) return;
         const btn = document.createElement("button");
         btn.className = "pod-chat-btn";
-        btn.innerHTML = "&#128172;";
+        btn.innerHTML = CHAT_ICON + (chatUnread.get(podId) ? `<span class="chat-unread"></span>` : "");
         btn.title = "Open match chat";
         btn.onclick = (e) => { e.stopPropagation(); openChat(podId); };
         el.appendChild(btn);
       });
     }
+    function refreshUnreadDot(podId) {
+      const btn = document.querySelector(`[data-pod-id="${CSS.escape(podId)}"] .pod-chat-btn`);
+      if (!btn) return;
+      const dot = btn.querySelector(".chat-unread");
+      if (chatUnread.get(podId)) { if (!dot) btn.insertAdjacentHTML("beforeend", `<span class="chat-unread"></span>`); }
+      else if (dot) dot.remove();
+    }
     function openChat(podId) {
       chatOpenPod = podId;
+      chatUnread.delete(podId);
+      refreshUnreadDot(podId);
+      lastRenderedMsg = null;
       document.getElementById("chatTitle").textContent = podLabelById(podId);
       document.getElementById("chatMsgs").innerHTML = `<div class="chat-empty">Loading...</div>`;
       document.getElementById("chatDrawer").classList.add("open");
@@ -934,36 +978,81 @@
     }
     function closeChat() {
       chatOpenPod = null;
+      lastRenderedMsg = null;
       document.getElementById("chatDrawer").classList.remove("open");
     }
-    function chatMsgHtml(m) {
+    function chatToast(text) {
+      const el = document.createElement("div");
+      el.className = "chat-toast";
+      el.textContent = text;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+    function avatarHtml(m) {
+      if (m.uid && m.avatar) {
+        return `<img src="https://cdn.discordapp.com/avatars/${escHtml(m.uid)}/${escHtml(m.avatar)}.png?size=64" alt="" loading="lazy"
+          onerror="this.parentNode.textContent='${escHtml((m.name || "?")[0].toUpperCase())}'">`;
+      }
+      return escHtml((m.name || "?")[0].toUpperCase());
+    }
+    // Discord-style grouping: consecutive messages from the same author within
+    // 5 minutes collapse under one avatar/header.
+    function chatMsgHtml(m, grouped) {
+      if (m.del) {
+        return `<div class="chat-msg deleted" data-msg-id="${escHtml(m.id)}">
+          <div class="chat-avatar" style="visibility:hidden;height:0"></div>
+          <div class="chat-body"><div class="m-text">Deleted by admin</div></div>
+        </div>`;
+      }
       const time = new Date(m.ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-      return `<div class="chat-msg${m.admin ? " admin" : ""}" data-msg-id="${escHtml(m.id)}">
-        <div class="m-head"><span class="m-name">${escHtml(m.name)}${m.admin ? " ⚑" : ""}</span><span class="m-time">${time}</span></div>
-        <div class="m-text">${escHtml(m.text)}</div>
+      return `<div class="chat-msg${m.admin ? " admin" : ""}${grouped ? " grouped" : ""}" data-msg-id="${escHtml(m.id)}">
+        <div class="chat-avatar">${avatarHtml(m)}</div>
+        <div class="chat-body">
+          <div class="m-head"><span class="m-name">${escHtml(m.name)}</span>${m.admin ? `<span class="m-badge">Admin</span>` : ""}<span class="m-time">${time}</span></div>
+          <div class="m-text">${escHtml(m.text)}</div>
+        </div>
         <button class="chat-del" title="Delete message" onclick="deleteChatMsg('${escHtml(m.id)}')">&#10005;</button>
       </div>`;
+    }
+    function isGrouped(m) {
+      if (m.del) { lastRenderedMsg = null; return false; }
+      const g = !!(lastRenderedMsg && !lastRenderedMsg.del &&
+        lastRenderedMsg.admin === !!m.admin &&
+        lastRenderedMsg.name === m.name &&
+        m.ts - lastRenderedMsg.ts < 5 * 60 * 1000);
+      lastRenderedMsg = { name: m.name, admin: !!m.admin, ts: m.ts, del: false };
+      return g;
     }
     function onChatHistory(data) {
       if (data.podId !== chatOpenPod) return;
       const box = document.getElementById("chatMsgs");
+      lastRenderedMsg = null;
       box.innerHTML = (data.messages && data.messages.length)
-        ? data.messages.map(chatMsgHtml).join("")
+        ? data.messages.map((m) => chatMsgHtml(m, isGrouped(m))).join("")
         : `<div class="chat-empty">No messages yet. Say hi to your block!</div>`;
       box.scrollTop = box.scrollHeight;
     }
     function onChatMsg(data) {
-      if (data.podId !== chatOpenPod) return;
+      // Clear the pending-send watchdog when our own message echoes back.
+      if (data.msg && data.msg.nonce && chatPending.has(data.msg.nonce)) {
+        clearTimeout(chatPending.get(data.msg.nonce).timer);
+        chatPending.delete(data.msg.nonce);
+      }
+      if (data.podId !== chatOpenPod) {
+        chatUnread.set(data.podId, (chatUnread.get(data.podId) || 0) + 1);
+        refreshUnreadDot(data.podId);
+        return;
+      }
       const box = document.getElementById("chatMsgs");
       const empty = box.querySelector(".chat-empty");
       if (empty) empty.remove();
-      box.insertAdjacentHTML("beforeend", chatMsgHtml(data.msg));
+      box.insertAdjacentHTML("beforeend", chatMsgHtml(data.msg, isGrouped(data.msg)));
       box.scrollTop = box.scrollHeight;
     }
     function onChatDel(data) {
       if (data.podId !== chatOpenPod) return;
       const el = document.querySelector(`#chatMsgs [data-msg-id="${CSS.escape(data.msgId)}"]`);
-      if (el) el.remove();
+      if (el) el.outerHTML = chatMsgHtml({ id: data.msgId, del: true }, false);
     }
     function onChatDenied(data) {
       if (data.podId === chatOpenPod) {
@@ -974,7 +1063,16 @@
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
       if (!text || !chatOpenPod) return;
-      wsSend({ t: "chat-send", podId: chatOpenPod, text });
+      if (!ws || ws.readyState !== 1) { chatToast("Message not sent — reconnecting, try again."); return; }
+      const nonce = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      const timer = setTimeout(() => {
+        if (chatPending.has(nonce)) {
+          chatPending.delete(nonce);
+          chatToast("Message not sent — please try again.");
+        }
+      }, 5000);
+      chatPending.set(nonce, { timer, text });
+      wsSend({ t: "chat-send", podId: chatOpenPod, text, nonce });
       input.value = "";
     }
     function deleteChatMsg(msgId) {

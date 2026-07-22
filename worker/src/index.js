@@ -453,6 +453,7 @@ export class SessionRoom {
         discordId: idn.kind === "discord" ? idn.discordId : null,
         uname: idn.kind === "discord" ? idn.uname : null,
         dname: idn.kind === "discord" ? idn.name : null,
+        avatar: idn.kind === "discord" ? (idn.avatar || null) : null,
       });
 
       if (this._doc) server.send(JSON.stringify({ t: "state", state: this._doc.state, version: this._doc.version, lastEditor: this._doc.lastEditor }));
@@ -560,7 +561,12 @@ export class SessionRoom {
     const pods = new Set();
     if (teamNames.size === 0) return pods;
     for (const p of s.pods) {
-      if (p.teams && p.teams.some((t) => t.name && teamNames.has(t.name))) pods.add(p.id);
+      if (!p.teams || !p.teams.some((t) => t.name && teamNames.has(t.name))) continue;
+      // A fully resolved match (every slot filled and placed) is archived for
+      // players — its teams have moved on. Admins keep access via "all".
+      const finished = p.teams.length >= 2 && p.teams.every((t) => t.name && t.placement !== 0);
+      if (finished) continue;
+      pods.add(p.id);
     }
     return pods;
   }
@@ -622,8 +628,11 @@ export class SessionRoom {
         text,
         name: isAdmin ? (att.editor || "Admin") : (att.dname || att.uname || "Player"),
         uname: att.uname || null,
+        uid: att.discordId || null,
+        avatar: att.avatar || null,
         admin: isAdmin,
       };
+      if (typeof data.nonce === "string" && data.nonce) msg.nonce = data.nonce.slice(0, 40);
       const list = await this.chatHistory(podId);
       list.push(msg);
       while (list.length > 300) list.shift();
@@ -636,9 +645,11 @@ export class SessionRoom {
       if (!att.canWrite) { ws.send(JSON.stringify({ t: "chat-denied", podId })); return; }
       const msgId = String(data.msgId || "");
       const list = await this.chatHistory(podId);
-      const next = list.filter((m) => m.id !== msgId);
-      if (next.length !== list.length) {
-        await this.state.storage.put(`chat:${podId}`, next);
+      const idx = list.findIndex((m) => m.id === msgId);
+      if (idx !== -1 && !list[idx].del) {
+        // Tombstone instead of removal: viewers see "Deleted by admin".
+        list[idx] = { id: list[idx].id, ts: list[idx].ts, del: true };
+        await this.state.storage.put(`chat:${podId}`, list);
         this.broadcastChat(podId, { t: "chat-del", podId, msgId });
       }
       return;
