@@ -381,6 +381,9 @@ export default function Home() {
   const [invitesList, setInvitesList] = useState<{ code: string; note: string; usedBy: string | null; createdAt: string | null }[]>([]);
   const [invitesLoading, setInvitesLoading] = useState(false);
   const [newInviteNote, setNewInviteNote] = useState("");
+  // Archive (frozen snapshot of a finished tournament)
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [previewWide, setPreviewWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1600);
   useEffect(() => {
     const onResize = () => setPreviewWide(window.innerWidth >= 1600);
@@ -1072,6 +1075,30 @@ export default function Home() {
     if (sessionCodeRef.current && adminToken) {
       doPutSession(sessionCodeRef.current, JSON.stringify({ pods: withMaps, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" }), adminToken);
     }
+  };
+
+  // Freeze the current tournament as an immutable server-side archive.
+  const archiveChampion = pods.find((p) => p.phase === "gf")?.teams.find((t) => t.placement === 1)?.name || null;
+  const handleArchiveTournament = async () => {
+    if (!adminToken) { toast.error("Sign in to archive a tournament"); return; }
+    setArchiveBusy(true);
+    try {
+      const stateStr = JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentName: tournamentNameRef.current, screen: "bracket" });
+      const res = await fetch(`${WORKER_URL}/archives`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({ state: stateStr, name: tournamentNameRef.current || "Untitled Tournament", size: tournamentSize, mode: tournamentMode, champion: archiveChampion }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const link = `https://rauder999.github.io/codebreakers-bracket/live.html?archive=${data.id}`;
+      try { await navigator.clipboard.writeText(link); } catch { /* clipboard optional */ }
+      toast.success(`Archived as ${data.id} — public link copied`, { duration: 5000 });
+      setShowArchiveConfirm(false);
+    } catch (e) {
+      toast.error(`Archive failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setArchiveBusy(false);
   };
 
   const handleNewTournament = () => {
@@ -1943,6 +1970,7 @@ export default function Home() {
           <button className={`cb-btn${compactMode ? " accent" : ""}`} onClick={handleCompact}>{compactMode ? "Normal" : "Compact"}</button>
           <button className="cb-btn success" onClick={handleExportPng}>Export PNG</button>
           <button className="cb-btn warn" onClick={() => setShowSavePanel(true)}>Saves</button>
+          {adminToken && authKind !== "cohost" && <button className="cb-btn" style={{ borderColor: "var(--cb-gold)", color: "var(--cb-gold)" }} onClick={() => setShowArchiveConfirm(true)}>Archive</button>}
           {/* Session chip */}
           {sessionCode && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(124,92,255,0.08)", border: "1px solid rgba(124,92,255,0.5)", padding: "4px 10px", fontSize: 11, letterSpacing: "0.08em" }}>
@@ -1959,6 +1987,30 @@ export default function Home() {
             </div>
           )}
           <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-muted)", opacity: 0.6, letterSpacing: "0.06em", marginLeft: 4 }}>CTRL+Z UNDO · CTRL+Y REDO</span>
+        </div>
+      )}
+
+      {/* Archive confirm */}
+      {showArchiveConfirm && (
+        <div className="cb-modal-backdrop" style={{ zIndex: 1100 }} onClick={() => !archiveBusy && setShowArchiveConfirm(false)}>
+          <div className="cb-modal" style={{ padding: 24, minWidth: 380, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="cb-modal-title" style={{ color: "var(--cb-gold)", marginBottom: 12 }}>Archive Tournament</div>
+            <div style={{ fontSize: 13, color: "var(--cb-text)", lineHeight: 1.6, marginBottom: 8 }}>
+              <b>{tournamentName || "Untitled Tournament"}</b> · {tournamentMode === "double" ? "DE" : "SE"} · {tournamentSize} teams
+            </div>
+            {archiveChampion ? (
+              <div style={{ fontSize: 13, color: "var(--cb-gold)", marginBottom: 12 }}>Champion: <b>{archiveChampion}</b></div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--cb-orange)", marginBottom: 12 }}>No champion yet — the Grand Final is not decided. You can still archive, but the bracket will be saved as-is.</div>
+            )}
+            <div style={{ fontSize: 12.5, color: "var(--cb-muted)", lineHeight: 1.6, marginBottom: 18 }}>
+              A frozen snapshot will be saved to the public archive gallery. It can never be edited — only viewed (or deleted by you).
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="cb-btn ghost" disabled={archiveBusy} onClick={() => setShowArchiveConfirm(false)}>Cancel</button>
+              <button className="cb-btn" style={{ borderColor: "var(--cb-gold)", color: "var(--cb-gold)" }} disabled={archiveBusy} onClick={handleArchiveTournament}>{archiveBusy ? "Archiving..." : "Freeze & Archive"}</button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -114,6 +114,19 @@
       0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--cb-red); }
       50%       { opacity: 0.3; box-shadow: none; }
     }
+    .live-badge.archived {
+      background: rgba(232,182,74,0.08);
+      border-color: rgba(232,182,74,0.55);
+      color: var(--cb-gold);
+    }
+    .live-badge.archived .live-dot { display: none; }
+    .gallery-card-champion {
+      font-family: var(--fm);
+      font-size: 11px;
+      color: var(--cb-gold);
+      margin-top: 6px;
+      letter-spacing: 0.06em;
+    }
     /* ─── Status bar ─── */
     .status-bar {
       display: flex;
@@ -491,7 +504,7 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <button class="compact-btn" id="compactBtn" onclick="toggleCompact()">Compact</button>
-      <button class="refresh-btn" onclick="fetchSession()">Refresh</button>
+      <button class="refresh-btn" onclick="currentArchive ? fetchArchive() : fetchSession()">Refresh</button>
     </div>
   </div>
 
@@ -499,6 +512,8 @@
   <div id="gallery-view">
     <div class="gallery-header">Live Tournaments</div>
     <div class="gallery-grid" id="galleryGrid"></div>
+    <div class="gallery-header" style="margin-top:36px">Past Tournaments</div>
+    <div class="gallery-grid" id="archiveGrid"></div>
     <div class="gallery-fallback">
       <span class="gallery-fallback-label">Have a code? Enter it:</span>
       <input class="code-input" id="codeInput" placeholder="CB-XXXX" maxlength="7"
@@ -519,6 +534,7 @@
     const PLACEMENT_LABELS = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th", 6: "6th", 7: "7th", 8: "8th" };
 
     let currentSession = null;
+    let currentArchive = null;
     let lastUpdated = null;
     let pollTimer = null;
     let galleryTimer = null;
@@ -531,10 +547,18 @@
     function getSessionParam() {
       return new URLSearchParams(window.location.search).get("session");
     }
+    function getArchiveParam() {
+      return new URLSearchParams(window.location.search).get("archive");
+    }
 
     function init() {
+      const arc = getArchiveParam();
       const code = getSessionParam();
-      if (code) {
+      if (arc) {
+        currentArchive = arc.toUpperCase();
+        showBracketView();
+        fetchArchive();
+      } else if (code) {
         currentSession = code.toUpperCase();
         showBracketView();
         fetchSession();
@@ -542,6 +566,7 @@
       } else {
         showGallery();
         loadGallery();
+        loadArchives();
         galleryTimer = setInterval(loadGallery, GALLERY_POLL);
       }
     }
@@ -553,9 +578,14 @@
       document.getElementById("liveBadge").style.display = "none";
       document.getElementById("tournamentNameEl").style.display = "none";
       document.getElementById("headerSubtitle").textContent = "LIVE TOURNAMENTS";
+      const badge = document.getElementById("liveBadge");
+      badge.classList.remove("archived");
+      badge.innerHTML = `<span class="live-dot"></span>LIVE`;
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       closeWs();
       currentSession = null;
+      currentArchive = null;
+      loadArchives();
       // Reset compact state
       if (document.body.classList.contains("compact")) {
         document.body.classList.remove("compact");
@@ -570,7 +600,15 @@
       document.getElementById("gallery-view").style.display = "none";
       document.getElementById("bracket-view").style.display = "block";
       document.getElementById("statusBar").style.display = "flex";
-      connectWs();
+      if (!currentArchive) connectWs(); // archives are frozen — no live socket
+    }
+
+    function openArchive(id) {
+      if (galleryTimer) { clearInterval(galleryTimer); galleryTimer = null; }
+      currentArchive = id;
+      history.pushState({}, "", `?archive=${id}`);
+      showBracketView();
+      fetchArchive();
     }
 
     function goToCode() {
@@ -622,6 +660,52 @@
       }
     }
 
+    // ─── Archive gallery (finished tournaments, frozen forever) ──────────────
+    async function loadArchives() {
+      const grid = document.getElementById("archiveGrid");
+      if (!grid) return;
+      try {
+        const res = await fetch(`${WORKER_URL}/archives`);
+        const json = await res.json();
+        if (!json.ok || !json.archives || json.archives.length === 0) {
+          grid.innerHTML = `<div class="gallery-empty" style="grid-column:1/-1">No archived tournaments yet.</div>`;
+          return;
+        }
+        grid.innerHTML = json.archives.map(a => {
+          const mode = a.mode === "double" ? "Double Elimination" : "Single Elimination";
+          const size = a.size ? `${a.size} teams` : "";
+          const meta = [mode, size].filter(Boolean).join(" · ");
+          const when = a.finishedAt ? new Date(a.finishedAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+          return `<div class="gallery-card" onclick="openArchive('${escHtml(a.id)}')">
+            <div class="gallery-card-name">${escHtml(a.name || a.id)}</div>
+            <div class="gallery-card-meta">${escHtml(meta)}</div>
+            ${a.champion ? `<div class="gallery-card-champion">&#127942; ${escHtml(a.champion)}</div>` : ""}
+            ${a.host ? `<div class="gallery-card-host">Host: ${escHtml(a.host)}</div>` : ""}
+            ${when ? `<div class="gallery-card-updated">Finished ${when}</div>` : ""}
+            <div class="gallery-card-arrow">&#8594;</div>
+          </div>`;
+        }).join("");
+      } catch {
+        grid.innerHTML = `<div class="gallery-empty" style="grid-column:1/-1">Could not load the archive.</div>`;
+      }
+    }
+
+    async function fetchArchive() {
+      if (!currentArchive) return;
+      try {
+        const res = await fetch(`${WORKER_URL}/archive/${currentArchive}`);
+        if (!res.ok) { showWaiting("Archive not found."); return; }
+        const json = await res.json();
+        if (!json.state) { showWaiting("Archive not found."); return; }
+        applyState(json.state);
+        const when = json.finishedAt ? new Date(json.finishedAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
+        lastUpdated = null; // stop the "Updated Xs ago" ticker — this bracket is frozen
+        document.getElementById("statusText").textContent = when ? `Finished ${when} · read-only archive` : "Read-only archive";
+      } catch {
+        document.getElementById("statusText").textContent = "Could not reach server.";
+      }
+    }
+
     function timeAgo(ts) {
       if (!ts) return "recently";
       const secs = Math.round((Date.now() - ts) / 1000);
@@ -640,21 +724,30 @@
       let data;
       try { data = JSON.parse(stateStr); } catch { return; }
       const { pods, tournamentMode, tournamentSize, tournamentName, finalsBracket } = data;
+      const label = currentSession || currentArchive || "";
       const nameEl = document.getElementById("tournamentNameEl");
       if (tournamentName) {
         nameEl.textContent = tournamentName;
         nameEl.style.display = "block";
-        document.title = `${tournamentName} - Codebreakers Live`;
+        document.title = `${tournamentName} - Codebreakers ${currentArchive ? "Archive" : "Live"}`;
       } else {
         nameEl.style.display = "none";
-        document.title = `${currentSession} - Codebreakers Live`;
+        document.title = `${label} - Codebreakers ${currentArchive ? "Archive" : "Live"}`;
       }
-      document.getElementById("headerSubtitle").textContent = currentSession;
+      document.getElementById("headerSubtitle").textContent = label;
       document.getElementById("main").innerHTML =
         renderBracket(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket });
-      document.getElementById("liveBadge").style.display = "inline-flex";
-      lastUpdated = new Date();
-      updateTimestamp();
+      const badge = document.getElementById("liveBadge");
+      badge.style.display = "inline-flex";
+      if (currentArchive) {
+        badge.classList.add("archived");
+        badge.innerHTML = "ARCHIVED";
+      } else {
+        badge.classList.remove("archived");
+        if (!badge.querySelector(".live-dot")) badge.innerHTML = `<span class="live-dot"></span>LIVE`;
+        lastUpdated = new Date();
+        updateTimestamp();
+      }
       // Draw connector lines after DOM settles
       requestAnimationFrame(() => measureConnectors(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket }));
     }

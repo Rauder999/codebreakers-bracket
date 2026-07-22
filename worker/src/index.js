@@ -19,6 +19,10 @@
 //   POST /invites       (X-Admin-Token: master)     -> { code }
 //   GET  /invites       (X-Admin-Token: master)     -> { invites: [...] }
 //   POST /session/:code/share  (owner)              -> { code, token }  co-host
+//   POST /archives      (account/master)            -> { id }  frozen snapshot
+//   GET  /archives      (public)                    -> { archives: [...] }
+//   GET  /archive/:id   (public)                    -> full snapshot
+//   DELETE /archive/:id (owner/master)              -> { ok }
 //   ... plus all Phase 1b session / bracket / ws routes
 // ============================================================================
 
@@ -221,6 +225,66 @@ export default {
       const iat = Date.now();
       const token = await signToken({ kind: "cohost", code, name: "Co-host", iat, exp: iat + COHOST_TOKEN_TTL }, env.AUTH_SECRET);
       return json({ ok: true, code, token });
+    }
+
+    // ── Archives: frozen snapshots of finished tournaments ─────────────────
+    // Immutable once created (no update route). Public to read, auth to write.
+    if (path === "/archives" && method === "GET") {
+      const list = await env.OPERATOR_KV.list({ prefix: "archive:" });
+      const archives = list.keys.map((k) => {
+        const md = k.metadata || {};
+        return {
+          id: k.name.replace(/^archive:/, ""),
+          name: md.name || "Untitled Tournament",
+          size: md.size || null,
+          mode: md.mode || null,
+          champion: md.champion || null,
+          host: md.host || null,
+          finishedAt: md.finishedAt || null,
+        };
+      });
+      archives.sort((a, b) => Date.parse(b.finishedAt || 0) - Date.parse(a.finishedAt || 0));
+      return json({ ok: true, archives });
+    }
+
+    if (path === "/archives" && method === "POST") {
+      const idn = await resolveIdentity(bearer(request), env);
+      if (idn.kind !== "master" && idn.kind !== "account") return json({ ok: false, error: "Unauthorized" }, 401);
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      if (!body.state || typeof body.state !== "string") return json({ ok: false, error: "Missing state" }, 400);
+      const id = makeCode("ARC-");
+      const meta = {
+        name: String(body.name || "Untitled Tournament").slice(0, 80),
+        size: body.size ?? null,
+        mode: body.mode ?? null,
+        champion: body.champion ? String(body.champion).slice(0, 60) : null,
+        host: idn.name || null,
+        owner: idn.accountId || "operator",
+        finishedAt: new Date().toISOString(),
+      };
+      await env.OPERATOR_KV.put(`archive:${id}`, JSON.stringify({ ...meta, state: body.state }), { metadata: meta });
+      return json({ ok: true, id });
+    }
+
+    const archMatch = path.match(/^\/archive\/([A-Za-z0-9\-]+)$/);
+    if (archMatch) {
+      const id = archMatch[1].toUpperCase();
+      if (method === "GET") {
+        const data = await env.OPERATOR_KV.get(`archive:${id}`);
+        if (!data) return json({ ok: false, error: "Archive not found" }, 404);
+        return new Response(data, { headers: { "Content-Type": "application/json", ...CORS } });
+      }
+      if (method === "DELETE") {
+        const idn = await resolveIdentity(bearer(request), env);
+        const existing = await env.OPERATOR_KV.get(`archive:${id}`, "json");
+        if (!existing) return json({ ok: false, error: "Archive not found" }, 404);
+        if (!(idn.kind === "master" || (idn.kind === "account" && existing.owner === idn.accountId))) {
+          return json({ ok: false, error: "Unauthorized" }, 401);
+        }
+        await env.OPERATOR_KV.delete(`archive:${id}`);
+        return json({ ok: true });
+      }
+      return json({ ok: false, error: "Method not allowed" }, 405);
     }
 
     // ── Session routes -> Durable Object ───────────────────────────────────
