@@ -252,7 +252,6 @@ export default {
       auth.searchParams.set("redirect_uri", redirectUri);
       auth.searchParams.set("scope", "identify");
       auth.searchParams.set("state", state);
-      auth.searchParams.set("prompt", "none");
       return Response.redirect(auth.toString(), 302);
     }
 
@@ -274,10 +273,16 @@ export default {
           redirect_uri: redirectUri,
         }),
       });
-      if (!tokenRes.ok) return Response.redirect(`${st.ret}#discord_error=exchange`, 302);
+      if (!tokenRes.ok) {
+        console.log("discord exchange failed", tokenRes.status, await tokenRes.text());
+        return Response.redirect(`${st.ret}#discord_error=exchange`, 302);
+      }
       const tok = await tokenRes.json();
       const meRes = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: `Bearer ${tok.access_token}` } });
-      if (!meRes.ok) return Response.redirect(`${st.ret}#discord_error=me`, 302);
+      if (!meRes.ok) {
+        console.log("discord /users/@me failed", meRes.status, await meRes.text());
+        return Response.redirect(`${st.ret}#discord_error=me`, 302);
+      }
       const me = await meRes.json();
       const iat = Date.now();
       const token = await signToken({

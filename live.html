@@ -628,7 +628,9 @@
         localStorage.setItem("cb_discord_token", discordToken);
         history.replaceState({}, "", window.location.pathname + window.location.search);
       } else if (h.indexOf("#discord_error") === 0) {
+        const reason = decodeURIComponent(h.split("=")[1] || "unknown");
         history.replaceState({}, "", window.location.pathname + window.location.search);
+        setTimeout(() => alert(`Discord sign-in failed (${reason}). Please try again or tell the organizer.`), 300);
       }
     }
 
