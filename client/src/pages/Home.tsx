@@ -32,8 +32,9 @@ import {
 // ─── Map data ─────────────────────────────────────────────────────────────────
 
 const MAP_NAMES = [
-  "Bernal", "Fangwai City", "Fortune Stadium", "Las Vegas Stadium",
-  "Monaco", "Nozomi/Citadel", "Skyway Stadium", "Sys$Horizon",
+  "Bernal", "Fangwai City", "Fortune Stadium", "Galaxy Estates",
+  "Las Vegas Stadium", "Monaco", "Nozomi/Citadel", "Skyway Stadium",
+  "Sys$Horizon",
 ];
 
 // ─── Persistence helpers ──────────────────────────────────────────────────────
