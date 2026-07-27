@@ -1,0 +1,7 @@
+{
+  "workerUrl": "https://codebreakers-api.codebreakerstf.workers.dev",
+  "announceChannelId": "1531414566355996722",
+  "pollIntervalSec": 60,
+  "resultsChannelId": "",
+  "model": "claude-opus-5"
+}

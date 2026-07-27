@@ -411,6 +411,23 @@ export default {
       return json({ ok: false, error: "Method not allowed" }, 405);
     }
 
+    // ── Bot: apply a verified match result (screenshot pipeline) ───────────
+    // Auth via shared secret; the DO applies placements and re-propagates.
+    if (path === "/bot/result" && method === "POST") {
+      if (!env.BOT_SECRET || request.headers.get("X-Bot-Secret") !== env.BOT_SECRET) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      const code = String(body.code || "").toUpperCase();
+      if (!code || !body.podId || !body.placements) return json({ ok: false, error: "code, podId, placements required" }, 400);
+      const stub = env.SESSION_ROOM.get(env.SESSION_ROOM.idFromName(code));
+      return stub.fetch(new Request(`https://do/session/${code}/bot-result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ podId: body.podId, placements: body.placements, editor: body.editor }),
+      }));
+    }
+
     // ── Session routes -> Durable Object ───────────────────────────────────
     const m = path.match(/^\/session\/([A-Za-z0-9\-]+)(\/ws|\/owner)?$/);
     if (m) {
@@ -485,6 +502,34 @@ export class SessionRoom {
 
     // Internal: report current owner (used by /share authorization).
     if (tail === "owner") return json({ ok: true, owner: this._doc ? (this._doc.owner || null) : null });
+
+    // Internal: bot-verified match result. Reached only via the worker's
+    // /bot/result route (public /session/:code router never forwards this tail).
+    if (tail === "bot-result" && method === "POST") {
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      if (!this._doc) return json({ ok: false, error: "Session not found" }, 404);
+      let s; try { s = JSON.parse(this._doc.state); } catch { return json({ ok: false, error: "Bad state" }, 500); }
+      const pod = (s.pods || []).find((p) => p.id === body.podId);
+      if (!pod) return json({ ok: false, error: "Pod not found" }, 404);
+      for (const [teamName, place] of Object.entries(body.placements || {})) {
+        const idx = pod.teams.findIndex((t) => t.name === teamName);
+        if (idx === -1) return json({ ok: false, error: `Team not in this match: ${teamName}` }, 400);
+        pod.teams[idx].placement = Number(place) || 0;
+      }
+      const opts = { finalsBracket: !!s.finalsBracket };
+      const cfg = resolveConfig(s.tournamentSize, s.tournamentMode, s.globalFormat, s.formatConfig || {}, opts);
+      s.pods = propagate(s.pods, s.tournamentSize, s.tournamentMode, cfg, opts);
+      await this.saveDoc({
+        ...this._doc,
+        state: JSON.stringify(s),
+        version: this._doc.version + 1,
+        lastEditor: body.editor || "Result Bot",
+        updatedAt: new Date().toISOString(),
+      });
+      this.broadcast();
+      await this.maybeIndex();
+      return json({ ok: true, version: this._doc.version });
+    }
 
     if (tail === "ws") {
       if (request.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });

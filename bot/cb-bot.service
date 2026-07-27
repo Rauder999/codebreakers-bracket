@@ -1,0 +1,14 @@
+[Unit]
+Description=CodeBreakers Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=claude-rauder
+WorkingDirectory=/opt/cb-bot
+ExecStart=/usr/bin/node /opt/cb-bot/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
