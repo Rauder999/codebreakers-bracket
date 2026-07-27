@@ -311,6 +311,46 @@ export default {
       return json({ ok: true, discordId: idn.discordId, uname: idn.uname, name: idn.name, avatar: idn.avatar });
     }
 
+    // ── Notion registrations -> team list for the admin setup ──────────────
+    // Reads the "CODE Tournament Registrations" database. Requires the
+    // NOTION_TOKEN secret (internal integration with access to that DB).
+    if (path === "/registrations" && method === "GET") {
+      const idn = await resolveIdentity(bearer(request), env);
+      if (idn.kind !== "master" && idn.kind !== "account") return json({ ok: false, error: "Unauthorized" }, 401);
+      if (!env.NOTION_TOKEN || !env.NOTION_DB_ID) return json({ ok: false, error: "Notion import is not configured yet" }, 503);
+      const tournament = url.searchParams.get("tournament") || "";
+      const filters = [{ property: "Status", select: { does_not_equal: "Rejected" } }];
+      if (tournament) filters.push({ property: "Tournament", select: { equals: tournament } });
+      const res = await fetch(`https://api.notion.com/v1/databases/${env.NOTION_DB_ID}/query`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": "2022-06-28", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filter: filters.length > 1 ? { and: filters } : filters[0],
+          sorts: [{ timestamp: "created_time", direction: "ascending" }],
+          page_size: 100,
+        }),
+      });
+      if (!res.ok) {
+        console.log("notion query failed", res.status, await res.text());
+        return json({ ok: false, error: `Notion API error ${res.status}` }, 502);
+      }
+      const data = await res.json();
+      const text = (p) => ((p && p.rich_text) || []).map((t) => t.plain_text).join("").trim();
+      const teams = (data.results || []).map((page) => {
+        const pr = page.properties || {};
+        const name = ((pr["Team Name"] && pr["Team Name"].title) || []).map((t) => t.plain_text).join("").trim();
+        return {
+          name,
+          players: [text(pr["Player 1 Embark"]), text(pr["Player 2 Embark"]), text(pr["Player 3 Embark"]), text(pr["Sub Embark"])].filter(Boolean),
+          discords: [text(pr["Player 1 Discord"]), text(pr["Player 2 Discord"]), text(pr["Player 3 Discord"]), text(pr["Sub Discord"])].filter(Boolean),
+          status: (pr["Status"] && pr["Status"].select && pr["Status"].select.name) || "Pending",
+          tournament: (pr["Tournament"] && pr["Tournament"].select && pr["Tournament"].select.name) || null,
+          submittedAt: page.created_time,
+        };
+      }).filter((t) => t.name);
+      return json({ ok: true, teams });
+    }
+
     // ── Archives: frozen snapshots of finished tournaments ─────────────────
     // Immutable once created (no update route). Public to read, auth to write.
     if (path === "/archives" && method === "GET") {

@@ -323,6 +323,9 @@ export default function Home() {
   const [csvStrengthCol, setCsvStrengthCol] = useState(1);
   const [csvPlayerCols, setCsvPlayerCols] = useState<number[]>([]);
   const [csvDiscordCols, setCsvDiscordCols] = useState<number[]>([]);
+  // Notion registrations import
+  const [notionTag, setNotionTag] = useState("");
+  const [notionLoading, setNotionLoading] = useState(false);
   const csvFileRef = useRef<HTMLInputElement>(null);
 
   // Undo / Redo
@@ -1224,6 +1227,29 @@ export default function Home() {
     e.target.value = "";
   };
 
+  // Pull registrations from the Notion form database into the seed list.
+  const handleNotionImport = async () => {
+    if (!adminToken) { toast.error("Sign in to import from Notion"); return; }
+    setNotionLoading(true);
+    try {
+      const qs = notionTag.trim() ? `?tournament=${encodeURIComponent(notionTag.trim())}` : "";
+      const res = await fetch(`${WORKER_URL}/registrations${qs}`, { headers: { Authorization: `Bearer ${adminToken}` } });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const teams: { name: string; players: string[]; discords: string[]; status: string }[] = data.teams || [];
+      if (teams.length === 0) { toast.warning("No registrations found in Notion"); return; }
+      const result: SeedEntry[] = teams.slice(0, tournamentSize).map((t, i) => ({ name: t.name.slice(0, 24), seed: i + 1, players: t.players, discords: t.discords }));
+      while (result.length < tournamentSize) result.push({ name: `TBD ${result.length + 1}`, seed: result.length + 1, players: [], discords: [] });
+      setSeeds(result);
+      const pending = teams.filter((t) => t.status === "Pending").length;
+      const over = teams.length > tournamentSize ? ` (${teams.length - tournamentSize} over the limit, dropped)` : "";
+      toast.success(`Imported ${Math.min(teams.length, tournamentSize)} teams from Notion${over}${pending ? ` · ${pending} still Pending` : ""}`);
+    } catch (e) {
+      toast.error(`Notion import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setNotionLoading(false);
+  };
+
   const handleCsvApply = () => {
     if (!csvRows) return;
     const newSeeds = seedsFromImport(csvRows, csvNameCol, csvStrengthCol, csvPlayerCols, csvDiscordCols, tournamentSize);
@@ -1608,8 +1634,21 @@ export default function Home() {
               ))}
             </div>
             <details className="adv" open={showCsvPanel} onToggle={(e) => setShowCsvPanel((e.target as HTMLDetailsElement).open)}>
-              <summary>Import teams — CSV / Google Sheets</summary>
+              <summary>Import teams — Notion / CSV / Google Sheets</summary>
               <div className="adv-inner">
+                <div className="csv-row">
+                  <input
+                    className="team-input"
+                    type="text"
+                    value={notionTag}
+                    onChange={(e) => setNotionTag(e.target.value)}
+                    placeholder="Tournament tag (e.g. CBL03) — empty = all"
+                    style={{ flex: 1 }}
+                  />
+                  <button className="cb-btn accent" onClick={handleNotionImport} disabled={notionLoading}>
+                    {notionLoading ? "Importing..." : "Import from Notion"}
+                  </button>
+                </div>
                 <div className="csv-row">
                   <input
                     className="team-input"
