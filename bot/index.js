@@ -1,8 +1,8 @@
 // ============================================================================
-// CodeBreakers Discord bot — v1
-//   • Match-ready pings: watches live bracket sessions over WebSocket and
+// CodeBreakers Discord bot \u2014 v1
+//   \u2022 Match-ready pings: watches live bracket sessions over WebSocket and
 //     pings team members when their next match is formed.
-//   • Tournament role sync (one-shot CLI):
+//   \u2022 Tournament role sync (one-shot CLI):
 //       node index.js sync-roles CB-XXXX ["Role Name"]
 // Config: config.json (worker URL, announce channel). Token: .env next to it.
 // ============================================================================
@@ -45,7 +45,7 @@ function findMember(g, discordName) {
   return g.members.cache.find((m) => m.user.username.toLowerCase() === n) || null;
 }
 
-// ─── Match-ready watcher ────────────────────────────────────────────────────
+// \u2500\u2500\u2500 Match-ready watcher \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 const sessions = new Map(); // code -> { ws, seen }
 
 async function pollSessions() {
@@ -88,7 +88,7 @@ async function onState(code, entry, stateStr) {
   const ann = new Set(persisted.announced[code]);
 
   // First snapshot of a session: swallow everything silently. Round 1 is
-  // "ready" by construction — pinging the whole tournament at once is noise.
+  // "ready" by construction \u2014 pinging the whole tournament at once is noise.
   if (!entry.seen) {
     entry.seen = true;
     for (const p of s.pods) if (podReady(p)) ann.add(p.id);
@@ -108,6 +108,12 @@ async function onState(code, entry, stateStr) {
 
 async function announce(code, s, pod) {
   const g = await mainGuild();
+  // Private setup thread first, so the announcement can link to it.
+  let thread = null;
+  if (matchesApi) {
+    try { thread = await matchesApi.onMatchReady(code, s, pod); }
+    catch (e) { console.error("matches: thread creation failed:", e.message); }
+  }
   const byTeam = new Map((s.seeds || []).map((sd) => [sd.name, sd.discords || []]));
   const names = pod.teams.map((t) => t.name);
   const mentions = [];
@@ -124,9 +130,14 @@ async function announce(code, s, pod) {
   const streamed = pod.onStream || pod.liveNow;
   const embed = {
     title: streamed ? `${CAMERA}  ${pod.label} ${DASH} STREAMED MATCH` : `${SWORDS}  ${pod.label} is ready`,
-    description: streamed
-      ? `${vs}\n\nThis match will be **streamed** ${DASH} wait for the moderator to DM the lobby code.`
-      : `${vs}\n\nYour match is **not** on stream ${DASH} please start as soon as possible.`,
+    description: [
+      vs,
+      "",
+      streamed
+        ? `This match will be **streamed** ${DASH} wait for the observer to send the lobby code.`
+        : `Your match is **not** on stream ${DASH} please play it as soon as possible.`,
+      thread ? `Setup, map bans and result submission: <#${thread.id}>` : null,
+    ].filter(Boolean).join("\n"),
     color: streamed ? 0xff4d5e : 0x7c5cff,
     footer: { text: "CODEBREAKERS \u00B7 live bracket" },
     timestamp: new Date().toISOString(),
@@ -141,14 +152,14 @@ async function announce(code, s, pod) {
   }
 }
 
-// ─── One-shot role sync: node index.js sync-roles CB-XXXX ["Role Name"] ─────
+// \u2500\u2500\u2500 One-shot role sync: node index.js sync-roles CB-XXXX ["Role Name"] \u2500\u2500\u2500\u2500\u2500
 async function syncRoles(code, roleName) {
   const res = await fetch(`${WORKER}/session/${code}`);
   const data = await res.json();
   if (!data.ok) throw new Error(`session ${code}: ${data.error || "not found"}`);
   const s = JSON.parse(data.state);
   const g = await mainGuild();
-  if (!g) throw new Error("bot is not in any guild — invite it first");
+  if (!g) throw new Error("bot is not in any guild \u2014 invite it first");
   const name = roleName || `Tournament: ${data.name || code}`;
   let role = g.roles.cache.find((r) => r.name === name);
   if (!role) role = await g.roles.create({ name, mentionable: true, reason: `CodeBreakers ${code}` });
@@ -164,14 +175,24 @@ async function syncRoles(code, roleName) {
   if (missing.length) console.log("not found on server:\n  " + missing.join("\n  "));
 }
 
-// ─── Entrypoint ─────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500 Modules \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// results: vision + moderator confirmation + stats. matches: per-match private
+// threads, map bans, and the only paths that may submit a screenshot.
+let resultsApi = null, matchesApi = null;
 try {
-  require("./results")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild });
+  resultsApi = require("./results")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild });
 } catch (e) { console.error("results module failed to load:", e.message); }
+try {
+  matchesApi = require("./matches")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results: resultsApi });
+} catch (e) { console.error("matches module failed to load:", e.message); }
 
+// \u2500\u2500\u2500 Entrypoint \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 const [, , cmd, arg1, arg2] = process.argv;
 client.once("clientReady", async () => {
   console.log(`logged in as ${client.user.tag}; guilds: ${[...client.guilds.cache.values()].map((g) => g.name).join(", ") || "none"}`);
+  if (matchesApi && cmd !== "sync-roles") {
+    try { await matchesApi.registerCommands(); } catch (e) { console.error("command registration failed:", e.message); }
+  }
   if (cmd === "sync-roles") {
     try { await syncRoles(String(arg1 || "").toUpperCase(), arg2); } catch (e) { console.error("sync-roles failed:", e.message); process.exitCode = 1; }
     client.destroy();

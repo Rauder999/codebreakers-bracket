@@ -428,6 +428,22 @@ export default {
       }));
     }
 
+    // ── Bot: set a match's map (outcome of the Discord map-ban phase) ──────
+    if (path === "/bot/map" && method === "POST") {
+      if (!env.BOT_SECRET || request.headers.get("X-Bot-Secret") !== env.BOT_SECRET) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      const code = String(body.code || "").toUpperCase();
+      if (!code || !body.podId || !body.map) return json({ ok: false, error: "code, podId, map required" }, 400);
+      const stub = env.SESSION_ROOM.get(env.SESSION_ROOM.idFromName(code));
+      return stub.fetch(new Request(`https://do/session/${code}/bot-map`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ podId: body.podId, map: body.map, editor: body.editor }),
+      }));
+    }
+
     // ── Session routes -> Durable Object ───────────────────────────────────
     const m = path.match(/^\/session\/([A-Za-z0-9\-]+)(\/ws|\/owner)?$/);
     if (m) {
@@ -502,6 +518,27 @@ export class SessionRoom {
 
     // Internal: report current owner (used by /share authorization).
     if (tail === "owner") return json({ ok: true, owner: this._doc ? (this._doc.owner || null) : null });
+
+    // Internal: map decided by the Discord ban phase. Reached only via the
+    // worker's /bot/map route.
+    if (tail === "bot-map" && method === "POST") {
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      if (!this._doc) return json({ ok: false, error: "Session not found" }, 404);
+      let s; try { s = JSON.parse(this._doc.state); } catch { return json({ ok: false, error: "Bad state" }, 500); }
+      const pod = (s.pods || []).find((p) => p.id === body.podId);
+      if (!pod) return json({ ok: false, error: "Pod not found" }, 404);
+      pod.map = String(body.map).slice(0, 40);
+      await this.saveDoc({
+        ...this._doc,
+        state: JSON.stringify(s),
+        version: this._doc.version + 1,
+        lastEditor: body.editor || "Map Ban Bot",
+        updatedAt: new Date().toISOString(),
+      });
+      this.broadcast();
+      await this.maybeIndex();
+      return json({ ok: true, version: this._doc.version, map: pod.map });
+    }
 
     // Internal: bot-verified match result. Reached only via the worker's
     // /bot/result route (public /session/:code router never forwards this tail).

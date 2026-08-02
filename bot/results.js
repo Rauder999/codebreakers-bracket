@@ -2,71 +2,52 @@
 // Screenshot result recognition \u2014 "bot proposes, moderator confirms".
 //   1. A participant posts a scoreboard screenshot in the tournament channel.
 //   2. We match the author to their active (ready, unplayed) match.
-//   3. Claude vision extracts the ranking; we cross-check rosters and map.
+//   3. Claude vision transcribes every squad and every player row; we
+//      reconcile those against the registered rosters (stats/rosters.js).
 //   4. A proposal embed with Apply/Reject buttons goes to the channel;
 //      a moderator (Manage Server) clicks Apply -> worker applies placements,
-//      the bracket propagates, and the match-ready pinger announces the next
-//      match automatically.
+//      the bracket propagates, the match-ready pinger announces the next
+//      match, and the full per-player stat line is committed to the stats DB.
 // Anti-abuse: author must be a participant of the match, image sha256 dedupe,
 // map cross-check, per-pod single pending proposal.
+//
+// Unicode is written as \uXXXX escapes on purpose: these files travel to the
+// VM through pipes that have mangled raw UTF-8 before.
 // ============================================================================
 const crypto = require("crypto");
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require("discord.js");
 const Anthropic = require("@anthropic-ai/sdk");
 
+const vision = require("./stats/vision");
+const { podRosters, derivePlacements, rosterHints } = require("./stats/rosters");
+
+// The stats store is optional: if better-sqlite3 is not built on this host we
+// still want match results to apply. Pings and results matter more than stats.
+let ingest = null;
+try { ingest = require("./stats/ingest"); }
+catch (e) { console.error("stats: store unavailable, results will not be recorded:", e.message); }
+
 const IMAGE_TYPES = { "image/png": 1, "image/jpeg": 1, "image/webp": 1, "image/gif": 1 };
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-const VERDICT_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["is_scoreboard", "confidence", "map_name", "ranking", "notes"],
-  properties: {
-    is_scoreboard: { type: "boolean", description: "True only if the image is a genuine end-of-match results/scoreboard screen" },
-    confidence: { type: "string", enum: ["high", "medium", "low"] },
-    map_name: { anyOf: [{ type: "string" }, { type: "null" }], description: "Map name visible on the screen, or null" },
-    ranking: {
-      type: "array",
-      description: "Teams from best placement to worst, using EXACTLY the provided team names",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["team", "evidence_players"],
-        properties: {
-          team: { type: "string" },
-          evidence_players: { type: "array", items: { type: "string" }, description: "Player names visible on screen that matched this team's roster" },
-        },
-      },
-    },
-    notes: { type: "string", description: "Anything suspicious or ambiguous, one or two sentences" },
-  },
+// Returned when the module cannot run, so callers never branch on undefined.
+const DISABLED = {
+  disabled: true,
+  submit: async () => ({ fail: "result recognition is not configured on this host" }),
+  findMatchForUser: () => null,
 };
 
 module.exports = function setupResults(ctx) {
-  const { client, sessions, CFG, ENV, WORKER, norm, mainGuild } = ctx;
-  if (!ENV.ANTHROPIC_API_KEY) { console.log("results: ANTHROPIC_API_KEY missing \u2014 screenshot recognition disabled"); return; }
-  if (!ENV.BOT_SECRET) { console.log("results: BOT_SECRET missing \u2014 screenshot recognition disabled"); return; }
+  const { client, sessions, CFG, ENV, WORKER, norm } = ctx;
+  if (!ENV.ANTHROPIC_API_KEY) { console.log("results: ANTHROPIC_API_KEY missing \u2014 screenshot recognition disabled"); return DISABLED; }
+  if (!ENV.BOT_SECRET) { console.log("results: BOT_SECRET missing \u2014 screenshot recognition disabled"); return DISABLED; }
 
   const anthropic = new Anthropic({ apiKey: ENV.ANTHROPIC_API_KEY });
-  const pending = new Map();      // proposal message id -> {code, podId, placements, authorId}
+  const pending = new Map();      // proposal message id -> full proposal context
   const pendingPods = new Set();  // podId with an open proposal
   const seenHashes = new Set();   // image sha256, session-lifetime
 
   const resultsChannelId = () => CFG.resultsChannelId || CFG.announceChannelId;
-
-  // Fallbacks beta may reject unknown combos server-side; degrade gracefully.
-  async function callClaude(params) {
-    try {
-      return await anthropic.beta.messages.create({
-        ...params,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-      });
-    } catch (e) {
-      if (e && e.status === 400) return anthropic.messages.create(params);
-      throw e;
-    }
-  }
 
   function findAuthorMatch(username) {
     const uname = norm(username);
@@ -86,13 +67,8 @@ module.exports = function setupResults(ctx) {
     return null;
   }
 
-  function rosterLine(s, teamName) {
-    const seed = (s.seeds || []).find((sd) => sd.name === teamName);
-    return `- ${teamName}: players [${(seed && seed.players || []).join(", ") || "unknown"}]`;
-  }
-
-  async function analyze(msg, att, found) {
-    const { code, state: s, pod } = found;
+  async function analyze(att, found) {
+    const { state: s, pod } = found;
     const res = await fetch(att.url);
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_IMAGE_BYTES) return { fail: "image too large" };
@@ -100,94 +76,74 @@ module.exports = function setupResults(ctx) {
     if (seenHashes.has(hash)) return { fail: "duplicate screenshot (already submitted)" };
     seenHashes.add(hash);
 
-    const mediaType = (att.contentType || "").split(";")[0] || "image/png";
-    const teams = pod.teams.map((t) => t.name);
-    const prompt = [
-      `You are verifying a competitive match result for the game THE FINALS.`,
-      `Match: ${pod.label}${pod.map ? ` on map "${pod.map}"` : ""}.`,
-      `Teams and rosters (Embark IDs):`,
-      ...teams.map((t) => rosterLine(s, t)),
-      ``,
-      `Examine the screenshot. Decide whether it is a genuine end-of-match results/scoreboard screen (not a lobby, mid-game HUD, or unrelated image).`,
-      `Match the player names visible on screen against the rosters above, and produce the final ranking best-to-worst using EXACTLY the team names given.`,
-      `If player names don't clearly match the rosters, or the screen looks like a different match, say so in notes and use low confidence.`,
-    ].join("\n");
-
-    const resp = await callClaude({
+    const rosters = podRosters(s, pod);
+    const out = await vision.extract({
+      anthropic,
       model: CFG.model || "claude-opus-5",
-      max_tokens: 2048,
-      output_config: { effort: "medium", format: { type: "json_schema", schema: VERDICT_SCHEMA } },
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: mediaType, data: buf.toString("base64") } },
-          { type: "text", text: prompt },
-        ],
-      }],
+      buf,
+      mediaType: (att.contentType || "").split(";")[0] || "image/png",
+      rosters: rosterHints(rosters),
+      expectedTeams: pod.teams.map((t) => t.name),
+      scheduledMap: pod.map || null,
+      label: pod.label || null,
     });
-    if (resp.stop_reason === "refusal") return { fail: "analysis was declined" };
-    const textBlock = resp.content.find((b) => b.type === "text");
-    if (!textBlock) return { fail: "empty analysis" };
-    let verdict;
-    try { verdict = JSON.parse(textBlock.text); } catch { return { fail: "unparseable analysis" }; }
-    return { verdict, hash };
+    if (out.fail) return { fail: out.fail };
+    return { verdict: out.verdict, hash, rosters };
   }
 
-  function buildPlacements(pod, verdict) {
-    const teams = pod.teams.map((t) => t.name);
-    const ranked = (verdict.ranking || []).map((r) => r.team).filter((t) => teams.includes(t));
-    if (!ranked.length) return null;
-    const placements = {};
-    ranked.forEach((t, i) => { placements[t] = i + 1; });
-    // Two-team match with only the winner identified: the other team is 2nd.
-    if (teams.length === 2 && ranked.length === 1) {
-      placements[teams.find((t) => t !== ranked[0])] = 2;
-    }
-    // Every slot must be placed for the bracket to propagate cleanly.
-    if (Object.keys(placements).length !== teams.length) return null;
-    return placements;
+  // Compact stat preview so a moderator can eyeball the numbers before Apply.
+  function statLines(assignments, placements) {
+    const DOT = "\u00B7", DASH = "\u2014";
+    return assignments
+      .filter((a) => a.team)
+      .sort((x, y) => (placements[x.team] || 99) - (placements[y.team] || 99))
+      .map((a) => {
+        const cash = a.squad.cash ? ` ${DOT} ${a.squad.cash}` : "";
+        const rows = (a.squad.players || []).map((p) => {
+          const kda = [p.eliminations, p.assists, p.deaths].map((v) => (v == null ? "?" : v)).join("/");
+          const cls = p.class ? `[${p.class}] ` : "";
+          return ` ${cls}${p.name} ${DASH} ${kda}${p.revives != null ? ` ${DOT} ${p.revives}R` : ""}`;
+        });
+        return [`**${placements[a.team]}.** ${a.team}${cash}`, ...rows].join("\n");
+      })
+      .join("\n");
   }
 
-  async function onMessage(msg) {
-    if (msg.author.bot || msg.channelId !== resultsChannelId()) return;
-    const att = [...msg.attachments.values()].find((a) => IMAGE_TYPES[(a.contentType || "").split(";")[0]]);
-    if (!att) return;
+  // Called only from an explicit submission (Submit button or /result), never
+  // from arbitrary images: see matches.js. Returns {ok} or {fail: reason}.
+  async function submit({ att, found, user, channel }) {
+    if (pendingPods.has(found.pod.id)) return { fail: "a result for this match is already waiting for a moderator" };
 
-    const found = findAuthorMatch(msg.author.username);
-    if (!found) { console.log(`results: screenshot from ${msg.author.username} \u2014 no active match, ignored`); return; }
-    if (pendingPods.has(found.pod.id)) { await msg.react("\u23F3"); return; } // hourglass: already reviewing
+    const { verdict, hash, rosters, fail } = await analyze(att, found);
+    if (fail) return { fail };
 
-    await msg.react("\uD83D\uDD0D"); // magnifying glass: analyzing
-    const { verdict, fail } = await analyze(msg, att, found);
-    if (fail || !verdict.is_scoreboard) {
-      await msg.reply({ content: `Could not verify this screenshot${fail ? ` (${fail})` : " (does not look like a match results screen)"}. A moderator can enter the result manually.`, allowedMentions: { repliedUser: false } });
-      return;
-    }
-
-    const placements = buildPlacements(found.pod, verdict);
+    const { placements, assignments, problems } = derivePlacements(verdict.squads, rosters);
     if (!placements) {
-      await msg.reply({ content: `Could not confidently match the teams on this screenshot to **${found.pod.label}** (${verdict.notes || "no roster match"}). A moderator can enter the result manually.`, allowedMentions: { repliedUser: false } });
-      return;
+      return { fail: `could not match the squads on screen to **${found.pod.label}** (${problems.join("; ") || verdict.notes || "no roster match"})` };
     }
 
-    const DASH = "\u2014";
-    const lines = Object.entries(placements).sort((a, b) => a[1] - b[1])
-      .map(([team, place]) => `**${place}.** ${team}`);
+    const DASH = "\u2014", WARN = "\u26A0\uFE0F", INFO = "\u2139\uFE0F";
     const mapMismatch = found.pod.map && verdict.map_name &&
       norm(verdict.map_name).replace(/[^a-z0-9]/g, "") !== norm(found.pod.map).replace(/[^a-z0-9]/g, "");
     const warnings = [];
-    if (mapMismatch) warnings.push(`\u26A0\uFE0F Map on screen ("${verdict.map_name}") does not match the scheduled map ("${found.pod.map}")`);
-    if (verdict.confidence !== "high") warnings.push(`\u26A0\uFE0F Confidence: ${verdict.confidence}`);
+    if (mapMismatch) warnings.push(`${WARN} Map on screen ("${verdict.map_name}") does not match the scheduled map ("${found.pod.map}")`);
+    if (verdict.in_progress) warnings.push(`${WARN} Screenshot looks like a match still in progress`);
+    if (verdict.confidence !== "high") warnings.push(`${WARN} Confidence: ${verdict.confidence}`);
+    for (const p of problems) warnings.push(`${WARN} ${p}`);
+    // Squads on screen that are not in this bracket match: normal when the
+    // match shared a lobby, but worth surfacing.
+    const outsiders = assignments.filter((a) => !a.team).length;
+    if (outsiders) warnings.push(`${INFO} ${outsiders} squad(s) on screen are not in this match; placements were taken from the relative order of the tournament teams`);
 
     const embed = {
       title: `\uD83D\uDCCB ${found.pod.label} ${DASH} result proposal`,
       description: [
-        lines.join("\n"),
+        statLines(assignments, placements),
         "",
         verdict.notes ? `Notes: ${verdict.notes}` : null,
         warnings.length ? warnings.join("\n") : null,
-        `Submitted by <@${msg.author.id}> \u00B7 session ${found.code}`,
-      ].filter(Boolean).join("\n"),
+        `Submitted by <@${user.id}> \u00B7 session ${found.code}`,
+      ].filter(Boolean).join("\n").slice(0, 4000),
       color: warnings.length ? 0xff8a3d : 0x28d17c,
       thumbnail: { url: att.url },
       footer: { text: "Waiting for a moderator to confirm" },
@@ -196,10 +152,15 @@ module.exports = function setupResults(ctx) {
       new ButtonBuilder().setCustomId("cbres:apply").setLabel("Apply result").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("cbres:reject").setLabel("Reject").setStyle(ButtonStyle.Danger),
     );
-    const proposal = await msg.reply({ embeds: [embed], components: [row], allowedMentions: { repliedUser: false } });
-    pending.set(proposal.id, { code: found.code, podId: found.pod.id, placements, embed });
+    const proposal = await channel.send({ embeds: [embed], components: [row] });
+    pending.set(proposal.id, {
+      code: found.code, state: found.state, pod: found.pod,
+      placements, assignments, verdict, embed,
+      sha256: hash, screenshotUrl: att.url, submittedBy: user.username,
+    });
     pendingPods.add(found.pod.id);
     console.log(`results: proposal for ${found.pod.id} (${found.code}): ${JSON.stringify(placements)} [${verdict.confidence}]`);
+    return { ok: true, message: proposal };
   }
 
   async function onButton(i) {
@@ -214,24 +175,46 @@ module.exports = function setupResults(ctx) {
       const res = await fetch(`${WORKER}/bot/result`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Bot-Secret": ENV.BOT_SECRET },
-        body: JSON.stringify({ code: entry.code, podId: entry.podId, placements: entry.placements, editor: `${i.user.username} (via bot)` }),
+        body: JSON.stringify({ code: entry.code, podId: entry.pod.id, placements: entry.placements, editor: `${i.user.username} (via bot)` }),
       });
       const data = await res.json();
       if (!data.ok) {
         await i.reply({ content: `Failed to apply: ${data.error || res.status}`, ephemeral: true });
         return;
       }
-      const embed = { ...entry.embed, color: 0x28d17c, footer: { text: `\u2705 Applied by ${i.user.username}` } };
+
+      // Stats are recorded only once the bracket has accepted the result. A
+      // failure here must never look like the result itself failed.
+      let statsNote = "";
+      if (ingest) {
+        try {
+          const out = ingest.commitMatch({
+            code: entry.code, state: entry.state, pod: entry.pod,
+            verdict: entry.verdict, assignments: entry.assignments, placements: entry.placements,
+            appliedBy: i.user.username, submittedBy: entry.submittedBy,
+            sha256: entry.sha256, screenshotUrl: entry.screenshotUrl,
+          });
+          statsNote = ` \u00B7 ${out.players} player stat lines recorded`;
+          console.log(`stats: committed match ${out.matchId} (${entry.code}/${entry.pod.id}): ${out.teams} teams, ${out.players} players`);
+        } catch (e) {
+          statsNote = " \u00B7 stats NOT recorded (see logs)";
+          console.error("stats: commit failed:", e.message);
+        }
+      }
+
+      const embed = { ...entry.embed, color: 0x28d17c, footer: { text: `\u2705 Applied by ${i.user.username}${statsNote}` } };
       await i.update({ embeds: [embed], components: [] });
     } else {
       const embed = { ...entry.embed, color: 0xff4d5e, footer: { text: `\u274C Rejected by ${i.user.username}` } };
       await i.update({ embeds: [embed], components: [] });
     }
     pending.delete(i.message.id);
-    pendingPods.delete(entry.podId);
+    pendingPods.delete(entry.pod.id);
   }
 
-  client.on("messageCreate", (m) => { onMessage(m).catch((e) => console.error("results onMessage:", e.message)); });
   client.on("interactionCreate", (i) => { onButton(i).catch((e) => console.error("results onButton:", e.message)); });
-  console.log("results: screenshot recognition armed (model " + (CFG.model || "claude-opus-5") + ")");
+  console.log("results: screenshot recognition armed (model " + (CFG.model || "claude-opus-5") + (ingest ? ", stats store ready" : ", stats store OFF") + ")");
+
+  // Submissions are driven by matches.js (Submit button / /result command).
+  return { submit, findMatchForUser: findAuthorMatch };
 };

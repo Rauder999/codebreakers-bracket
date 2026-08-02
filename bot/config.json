@@ -1,7 +1,38 @@
-{
+﻿{
   "workerUrl": "https://codebreakers-api.codebreakerstf.workers.dev",
   "announceChannelId": "1531414566355996722",
   "pollIntervalSec": 60,
   "resultsChannelId": "",
-  "model": "claude-opus-5"
+  "model": "claude-opus-5",
+  "stats": {
+    "port": 8110,
+    "bind": "0.0.0.0",
+    "baseUrl": "https://stats.playrservers.com",
+    "discordClientId": "1529573475650371919",
+    "requireGuildId": [
+      "1531414527701287112"
+    ],
+    "adminDiscordIds": [
+      "743956656429203535",
+      "614861553790877709"
+    ],
+    "allowDiscordIds": [],
+    "sessionDays": 30,
+    "publicOrigins": [
+      "https://rauder999.github.io"
+    ]
+  },
+  "matchThreads": true,
+  "mapBans": true,
+  "maps": [
+    "Bernal",
+    "Fangwai City",
+    "Fortune Stadium",
+    "Galaxy Estates",
+    "Las Vegas Stadium",
+    "Monaco",
+    "Nozomi/Citadel",
+    "Skyway Stadium",
+    "Sys$Horizon"
+  ]
 }
