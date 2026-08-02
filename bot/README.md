@@ -34,8 +34,10 @@ Everything lives in `/opt/cb-bot`. Node 22, discord.js v14, systemd service `cb-
 | File | Purpose |
 |---|---|
 | `index.js` | Core: Discord login, session watcher, match-ready pings, role sync CLI |
-| `results.js` | Screenshot result recognition (Claude vision) |
-| `config.json` | `workerUrl`, `announceChannelId`, `resultsChannelId` (empty = same), `pollIntervalSec`, `model` |
+| `matches.js` | Per-match private threads, map bans, result-submission gating (`/result`, Submit button) |
+| `results.js` | Screenshot result recognition (Claude vision) + stats commit; exposes `submit()` |
+| `config.json` | `workerUrl`, `announceChannelId`, `resultsChannelId`, `pollIntervalSec`, `model`, `matchThreads`, `mapBans`, `maps[]`, `stats{}` |
+| `matches.json` | Per-match thread state: thread id, seed order, rosters, map pool, bans, decided map |
 | `.env` | Secrets (chmod 600): `DISCORD_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `BOT_SECRET` |
 | `state.json` | Persistence: which pods were already announced (no double-pings across restarts) |
 
@@ -52,9 +54,32 @@ Everything lives in `/opt/cb-bot`. Node 22, discord.js v14, systemd service `cb-
   variant; normal matches get purple "start as soon as possible".
 - Dedup persists in `state.json`.
 
-### 2.2 Screenshot result recognition (automatic + mod confirm)
+### 2.1b Per-match private threads + map bans (`matches.js`, added 2026-08-02)
 
-Flow: participant posts a scoreboard screenshot in the results channel →
+When a match becomes ready the bot opens a **private thread** in the announce
+channel (only that match's players are added; the channel announcement links to
+it) and runs the setup there:
+
+- **Map bans.** Pool = `teams + 1` maps drawn from `config.maps`. Teams ban one
+  each in **seed order, best seed first**, via buttons. Wrong team / non-player
+  gets an ephemeral refusal; a moderator (Manage Server) may ban on a team's
+  behalf. The surviving map is written back to the bracket through
+  `POST /bot/map` and shown to everyone.
+- **How to start.** Normal match: the best-seeded team hosts the lobby and posts
+  the code in the thread. Streamed match (`onStream`/`liveNow` in the admin app):
+  nobody creates a lobby, everyone waits for the observer's code.
+- State lives in `matches.json`, so threads and ban progress survive restarts.
+
+> **The in-bracket match chat was removed** from `live.html` on the same date —
+> nobody used it. Discord threads are now the only player-facing channel.
+
+### 2.2 Screenshot result recognition (explicit submission + mod confirm)
+
+Results are **never** read from arbitrary images. A player must either press
+**Submit result** in the match thread (arms a 15-minute window for that user in
+that thread) or use the **`/result`** slash command with the screenshot attached.
+Everything else posted in the thread is ignored, so memes and GIFs never reach
+the vision model. Then:
 1. Bot checks the author is a **participant of an active, unplayed match** (Discord
    username matched against the roster in the live bracket state). Others are ignored.
 2. Anti-replay: sha256 dedupe of the image; one pending proposal per match.
@@ -116,9 +141,9 @@ confirm; role sync CLI.
 
 **Not done yet — the open roadmap, roughly in priority order:**
 
-1. **Streamed-match semi-automation.** When a match flagged "on stream" forms: bot
-   creates a thread, pings the moderator + captains; the mod gives the bot the private
-   lobby code; bot DMs it to the captains with a placement checklist. Lobby creation
+1. **Observer tooling for streamed matches.** The thread already tells players to
+   wait for the code; next step is a moderator-only way to push the lobby code into
+   the thread (or DM it to captains) plus a placement checklist. Lobby creation
    itself stays manual (no game API).
 2. **Move to the production CODE Discord server** before the next tournament: invite
    link (ask Rauder — client id `1529573475650371919`, permissions preset exists),
