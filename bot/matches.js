@@ -35,10 +35,11 @@ const DASH = "\u2014", DOT = "\u00B7", BAN = "\uD83D\uDEAB", SWORDS = "\u2694\uF
 const CAMERA = "\uD83C\uDFA5", PIN = "\uD83D\uDCCD", HOST = "\uD83C\uDFE0", CHECK = "\u2705";
 
 module.exports = function setupMatches(ctx) {
-  const { client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results } = ctx;
+  const { client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results, syncRoles } = ctx;
 
-  let store = { threads: {} };
+  let store = { threads: {}, channels: {} };
   try { store = JSON.parse(fs.readFileSync(STORE, "utf8")); } catch { /* fresh */ }
+  if (!store.channels) store.channels = {};
   const save = () => { try { fs.writeFileSync(STORE, JSON.stringify(store)); } catch (e) { console.error("matches: state save failed:", e.message); } };
 
   const armed = new Map();               // `${threadId}:${userId}` -> timestamp
@@ -48,6 +49,8 @@ module.exports = function setupMatches(ctx) {
   const key = (code, podId) => `${code}:${podId}`;
   const pool = () => (Array.isArray(CFG.maps) && CFG.maps.length ? CFG.maps : DEFAULT_MAPS);
   const bansEnabled = () => CFG.mapBans !== false;
+  // Per-tournament channel: bound with /tournament bind, else the config default.
+  const channelFor = (code) => store.channels[code] || CFG.announceChannelId;
 
   // ---- roster helpers ------------------------------------------------------
   // Discords may arrive as one comma-joined string per team - expand first.
@@ -142,7 +145,7 @@ module.exports = function setupMatches(ctx) {
       try { return await client.channels.fetch(store.threads[k].threadId); } catch { /* recreate below */ }
       delete store.threads[k];
     }
-    const parentId = CFG.announceChannelId;
+    const parentId = channelFor(code);
     if (!parentId) return null;
     const parent = await client.channels.fetch(parentId);
     const g = await mainGuild();
@@ -294,8 +297,51 @@ module.exports = function setupMatches(ctx) {
     await respond("Screenshot read. The proposed result is posted here and is waiting for a moderator to confirm.");
   }
 
+  // /tournament - host-side setup, hidden from non-moderators.
+  async function onTournamentCmd(i) {
+    const sub = i.options.getSubcommand();
+
+    if (sub === "bind") {
+      const code = i.options.getString("code").toUpperCase();
+      store.channels[code] = i.channelId;
+      save();
+      await i.reply({ content: `Bound tournament **${code}** to this channel. Match announcements and private threads will be created here.`, ephemeral: true });
+      return;
+    }
+
+    if (sub === "roles") {
+      await i.deferReply({ ephemeral: true });
+      const code = (i.options.getString("code") || [...sessions.keys()][0] || "").toUpperCase();
+      if (!code) { await i.editReply("No active tournament found. Pass the session code explicitly."); return; }
+      try {
+        const out = await syncRoles(code, i.options.getString("role") || undefined);
+        const missing = out.missing.length ? `\nNot found on this server:\n${out.missing.map((m) => `- ${m}`).join("\n")}`.slice(0, 1500) : "";
+        await i.editReply(`Role **${out.name}**: assigned to ${out.added} member(s).${missing}`);
+      } catch (e) {
+        await i.editReply(`Role sync failed: ${e.message}`);
+      }
+      return;
+    }
+
+    if (sub === "status") {
+      const lines = [];
+      for (const [code, entry] of sessions) {
+        const s = entry.lastState;
+        const started = s && s.tournamentStarted ? "STARTED" : "not started";
+        const teams = s && s.seeds ? s.seeds.filter((x) => x.name && !String(x.name).startsWith("TBD")).length : "?";
+        const ch = channelFor(code);
+        const threads = Object.values(store.threads).filter((t) => t.code === code).length;
+        lines.push(`**${code}** ${DOT} ${teams} teams ${DOT} ${started} ${DOT} channel ${ch ? `<#${ch}>` : "none"} ${DOT} ${threads} match thread(s)`);
+      }
+      await i.reply({ content: lines.length ? lines.join("\n") : "No active tournament sessions.", ephemeral: true });
+      return;
+    }
+  }
+
   async function onSlash(i) {
-    if (!i.isChatInputCommand() || i.commandName !== "result") return;
+    if (!i.isChatInputCommand()) return;
+    if (i.commandName === "tournament") { await onTournamentCmd(i); return; }
+    if (i.commandName !== "result") return;
     const att = i.options.getAttachment("screenshot");
     if (!att || !IMAGE_TYPES[(att.contentType || "").split(";")[0]]) {
       await i.reply({ content: "Please attach a PNG or JPEG screenshot.", ephemeral: true });
@@ -333,7 +379,7 @@ module.exports = function setupMatches(ctx) {
   }
 
   async function registerCommands() {
-    const cmd = {
+    const resultCmd = {
       name: "result",
       description: "Submit your end-of-match scoreboard screenshot",
       options: [{
@@ -343,8 +389,35 @@ module.exports = function setupMatches(ctx) {
         required: true,
       }],
     };
+    const tournamentCmd = {
+      name: "tournament",
+      description: "Host tools: bind a channel, sync roles, check status",
+      defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+      options: [
+        {
+          name: "bind",
+          description: "Use THIS channel for a tournament's announcements and match threads",
+          type: ApplicationCommandOptionType.Subcommand,
+          options: [{ name: "code", description: "Session code, e.g. CB-XXXX", type: ApplicationCommandOptionType.String, required: true }],
+        },
+        {
+          name: "roles",
+          description: "Create the tournament role and assign it to every registered player",
+          type: ApplicationCommandOptionType.Subcommand,
+          options: [
+            { name: "code", description: "Session code (default: the active one)", type: ApplicationCommandOptionType.String, required: false },
+            { name: "role", description: "Custom role name (default: Tournament: <name>)", type: ApplicationCommandOptionType.String, required: false },
+          ],
+        },
+        {
+          name: "status",
+          description: "Show watched tournaments, start state, bound channels",
+          type: ApplicationCommandOptionType.Subcommand,
+        },
+      ],
+    };
     for (const g of client.guilds.cache.values()) {
-      try { await g.commands.set([cmd]); console.log(`matches: /result registered in ${g.name}`); }
+      try { await g.commands.set([resultCmd, tournamentCmd]); console.log(`matches: /result and /tournament registered in ${g.name}`); }
       catch (e) { console.error(`matches: command registration failed in ${g.name}:`, e.message); }
     }
   }
@@ -357,5 +430,5 @@ module.exports = function setupMatches(ctx) {
   client.on("messageCreate", (m) => { onMessage(m).catch((e) => console.error("matches onMessage:", e.message)); });
 
   console.log("matches: threads " + (CFG.matchThreads === false ? "OFF" : "ON") + ", map bans " + (bansEnabled() ? "ON" : "OFF"));
-  return { onMatchReady, registerCommands };
+  return { onMatchReady, registerCommands, channelFor };
 };

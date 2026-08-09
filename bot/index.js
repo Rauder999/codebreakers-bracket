@@ -90,15 +90,10 @@ async function onState(code, entry, stateStr) {
   if (!persisted.announced[code]) persisted.announced[code] = [];
   const ann = new Set(persisted.announced[code]);
 
-  // First snapshot of a session: swallow everything silently. Round 1 is
-  // "ready" by construction \u2014 pinging the whole tournament at once is noise.
-  if (!entry.seen) {
-    entry.seen = true;
-    for (const p of s.pods) if (podReady(p)) ann.add(p.id);
-    persisted.announced[code] = [...ann];
-    savePersisted();
-    return;
-  }
+  // The host controls the starting gun: until the admin panel sets
+  // tournamentStarted, the bot neither pings nor opens threads. The moment it
+  // flips true, every ready pod (round 1 included) gets announced exactly once.
+  if (!s.tournamentStarted) return;
 
   for (const pod of s.pods) {
     if (!podReady(pod) || ann.has(pod.id)) continue;
@@ -147,9 +142,10 @@ async function announce(code, s, pod) {
   };
 
   console.log(`[${code}] announce ${pod.id}: ${names.join(" vs ")} (${mentions.length} mentions)`);
-  if (CFG.announceChannelId) {
+  const channelId = (matchesApi && matchesApi.channelFor) ? matchesApi.channelFor(code) : CFG.announceChannelId;
+  if (channelId) {
     try {
-      const ch = await client.channels.fetch(CFG.announceChannelId);
+      const ch = await client.channels.fetch(channelId);
       await ch.send({ content: mentions.join(" "), embeds: [embed] });
     } catch (e) { console.error("announce send failed:", e.message); }
   }
@@ -176,6 +172,7 @@ async function syncRoles(code, roleName) {
   }
   console.log(`role "${name}": +${added} members`);
   if (missing.length) console.log("not found on server:\n  " + missing.join("\n  "));
+  return { name, added, missing };
 }
 
 // \u2500\u2500\u2500 Modules \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -186,7 +183,7 @@ try {
   resultsApi = require("./results")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild });
 } catch (e) { console.error("results module failed to load:", e.message); }
 try {
-  matchesApi = require("./matches")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results: resultsApi });
+  matchesApi = require("./matches")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results: resultsApi, syncRoles });
 } catch (e) { console.error("matches module failed to load:", e.message); }
 
 // \u2500\u2500\u2500 Entrypoint \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500

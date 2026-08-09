@@ -54,6 +54,7 @@ interface SavedTournament {
   formatConfig?: FormatConfig;
   globalFormat?: PodSize;
   finalsBracket?: boolean;
+  tournamentStarted?: boolean;
 }
 
 function loadSaves(): SavedTournament[] {
@@ -308,6 +309,10 @@ export default function Home() {
   const [compactMode, setCompactMode] = useState(false);
   // Format config
   const [formatConfig, setFormatConfig] = useState<FormatConfig>(_as?.formatConfig ?? {});
+  // Gate for Discord automation: until the host presses Start Tournament, the
+  // bot stays silent (no pings, no match threads).
+  const [tournamentStarted, setTournamentStarted] = useState<boolean>(_as?.tournamentStarted ?? false);
+  const [showStartConfirm, setShowStartConfirm] = useState(false);
   const [globalFormat, setGlobalFormat] = useState<PodSize>(_as?.globalFormat ?? 4);
   const [finalsBracket, setFinalsBracket] = useState<boolean>(_as?.finalsBracket ?? false);
   const engineOpts = useMemo(() => ({ finalsBracket }), [finalsBracket]);
@@ -437,9 +442,9 @@ export default function Home() {
 
   // Autosave
   useEffect(() => {
-    const data: Partial<SavedTournament> = { screen, tournamentSize, tournamentMode, seeds, pods, formatConfig, globalFormat, finalsBracket };
+    const data: Partial<SavedTournament> = { screen, tournamentSize, tournamentMode, seeds, pods, formatConfig, globalFormat, finalsBracket, tournamentStarted };
     localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
-  }, [screen, tournamentSize, tournamentMode, seeds, pods, formatConfig, globalFormat, finalsBracket]);
+  }, [screen, tournamentSize, tournamentMode, seeds, pods, formatConfig, globalFormat, finalsBracket, tournamentStarted]);
 
   // Undo/redo
   const setPodsWithHistory = useCallback((updater: Pod[] | ((prev: Pod[]) => Pod[])) => {
@@ -453,7 +458,7 @@ export default function Home() {
 
   // Serialize a full snapshot with explicit pods — used to sync undo/redo, which
   // replace the whole pods array rather than sending a single per-match mutation.
-  const buildStateWithPods = useCallback((podsArg: Pod[]) => JSON.stringify({ pods: podsArg, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen }), [tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen]);
+  const buildStateWithPods = useCallback((podsArg: Pod[]) => JSON.stringify({ pods: podsArg, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentStarted, screen }), [tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentStarted, screen]);
   const buildStateWithPodsRef = useRef(buildStateWithPods);
   buildStateWithPodsRef.current = buildStateWithPods;
 
@@ -666,7 +671,7 @@ export default function Home() {
 
   // ─── Session helpers ──────────────────────────────────────────────────────────
 
-  const buildSessionState = useCallback(() => JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen }), [pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, screen]);
+  const buildSessionState = useCallback(() => JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentStarted, screen }), [pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentStarted, screen]);
   // Always-fresh accessor so effects can serialize current state without listing
   // pods in their deps (which would fire on every result click).
   const buildSessionStateRef = useRef(buildSessionState);
@@ -683,6 +688,7 @@ export default function Home() {
       if (s.formatConfig !== undefined) setFormatConfig(s.formatConfig);
       if (s.globalFormat) setGlobalFormat(s.globalFormat);
       if (s.finalsBracket !== undefined) setFinalsBracket(s.finalsBracket);
+      if (s.tournamentStarted !== undefined) setTournamentStarted(s.tournamentStarted);
       // NOTE: `screen` is intentionally NOT adopted — it's local navigation.
       // Adopting it here yanked the operator back to Home on every sync.
       sessionVersionRef.current = version;
@@ -1018,7 +1024,8 @@ export default function Home() {
     setScreen("bracket");
     // ALWAYS start a fresh session. Any previous tournament stays on the server
     // (visible in Connect to Session) until deleted, and never mixes into this one.
-    const stateStr = JSON.stringify({ pods: initial, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" });
+    setTournamentStarted(false); // a fresh bracket is always un-started
+    const stateStr = JSON.stringify({ pods: initial, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, tournamentStarted: false, screen: "bracket" });
     if (adminToken) {
       createSessionForState(stateStr, adminToken);
     } else {
@@ -1084,7 +1091,7 @@ export default function Home() {
     setPodsWithHistory(withMaps);
     // Reset is a full replacement -> push the whole snapshot.
     if (sessionCodeRef.current && adminToken) {
-      doPutSession(sessionCodeRef.current, JSON.stringify({ pods: withMaps, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, screen: "bracket" }), adminToken);
+      doPutSession(sessionCodeRef.current, JSON.stringify({ pods: withMaps, tournamentSize, tournamentMode, seeds: normalised, formatConfig, globalFormat, finalsBracket, tournamentStarted, screen: "bracket" }), adminToken);
     }
   };
 
@@ -1094,7 +1101,7 @@ export default function Home() {
     if (!adminToken) { toast.error("Sign in to archive a tournament"); return; }
     setArchiveBusy(true);
     try {
-      const stateStr = JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentName: tournamentNameRef.current, screen: "bracket" });
+      const stateStr = JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentStarted, tournamentName: tournamentNameRef.current, screen: "bracket" });
       const res = await fetch(`${WORKER_URL}/archives`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
@@ -1110,6 +1117,20 @@ export default function Home() {
       toast.error(`Archive failed: ${e instanceof Error ? e.message : String(e)}`);
     }
     setArchiveBusy(false);
+  };
+
+  // Flips the Discord automation on: the bot pings round-1 teams and opens
+  // their match threads the moment this state reaches the server.
+  const handleStartTournament = () => {
+    setTournamentStarted(true);
+    setShowStartConfirm(false);
+    const stateStr = JSON.stringify({ pods, tournamentSize, tournamentMode, seeds, formatConfig, globalFormat, finalsBracket, tournamentStarted: true, screen: "bracket" });
+    if (sessionCodeRef.current && adminToken) {
+      doPutSession(sessionCodeRef.current, stateStr, adminToken);
+      toast.success("Tournament started — Discord pings and match threads are going out", { duration: 4000 });
+    } else {
+      toast.warning("No live session — connect or generate one first");
+    }
   };
 
   const handleNewTournament = () => {
@@ -2052,6 +2073,12 @@ export default function Home() {
           <button className={`cb-btn${compactMode ? " accent" : ""}`} onClick={handleCompact}>{compactMode ? "Normal" : "Compact"}</button>
           <button className="cb-btn success" onClick={handleExportPng}>Export PNG</button>
           <button className="cb-btn warn" onClick={() => setShowSavePanel(true)}>Saves</button>
+          {adminToken && !tournamentStarted && sessionCode && (
+            <button className="cb-btn" style={{ borderColor: "var(--cb-green)", color: "var(--cb-green)", fontWeight: 700 }} onClick={() => setShowStartConfirm(true)}>Start Tournament</button>
+          )}
+          {tournamentStarted && (
+            <span className="cb-chip" style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, letterSpacing: "0.1em", color: "var(--cb-green)", border: "1px solid rgba(40,209,124,0.5)", padding: "3px 8px" }}>STARTED</span>
+          )}
           {adminToken && authKind !== "cohost" && <button className="cb-btn" style={{ borderColor: "var(--cb-gold)", color: "var(--cb-gold)" }} onClick={() => setShowArchiveConfirm(true)}>Archive</button>}
           {/* Session chip */}
           {sessionCode && (
@@ -2069,6 +2096,22 @@ export default function Home() {
             </div>
           )}
           <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-muted)", opacity: 0.6, letterSpacing: "0.06em", marginLeft: 4 }}>CTRL+Z UNDO · CTRL+Y REDO</span>
+        </div>
+      )}
+
+      {/* Start tournament confirm */}
+      {showStartConfirm && (
+        <div className="cb-modal-backdrop" style={{ zIndex: 1100 }} onClick={() => setShowStartConfirm(false)}>
+          <div className="cb-modal" style={{ padding: 24, minWidth: 380, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="cb-modal-title" style={{ color: "var(--cb-green)", marginBottom: 12 }}>Start Tournament</div>
+            <div style={{ fontSize: 13, color: "var(--cb-text)", lineHeight: 1.6, marginBottom: 16 }}>
+              The Discord bot will immediately ping every round-1 team and open their private match threads (map bans, lobby setup, result submission). Until you start, the bot stays silent.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="cb-btn ghost" onClick={() => setShowStartConfirm(false)}>Cancel</button>
+              <button className="cb-btn" style={{ borderColor: "var(--cb-green)", color: "var(--cb-green)" }} onClick={handleStartTournament}>Start — ping the teams</button>
+            </div>
+          </div>
         </div>
       )}
 

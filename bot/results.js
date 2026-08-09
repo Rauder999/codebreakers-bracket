@@ -137,81 +137,133 @@ module.exports = function setupResults(ctx) {
     const outsiders = assignments.filter((a) => !a.team).length;
     if (outsiders) warnings.push(`${INFO} ${outsiders} squad(s) on screen are not in this match; placements were taken from the relative order of the tournament teams`);
 
+    // Player confirmation instead of moderator review: a strict majority of
+    // the match's registered players (floor(n/2)+1) must press Accept - or a
+    // single admin click applies it immediately.
+    const playersSet = new Set();
+    for (const t of found.pod.teams) {
+      const seed = (found.state.seeds || []).find((sd) => sd.name === t.name);
+      for (const d of ((seed && seed.discords) || []).flatMap((x) => String(x).split(","))) {
+        const n = norm(d);
+        if (n) playersSet.add(n);
+      }
+    }
+    const threshold = playersSet.size ? Math.floor(playersSet.size / 2) + 1 : 0;
+    const confirmLine = threshold
+      ? `Players of this match: press **Accept result** to confirm (${threshold} of ${playersSet.size} needed) \u2014 or one admin click applies it instantly.`
+      : `Waiting for an admin to confirm (no registered players found for this match).`;
+
     const embed = {
-      title: `\uD83D\uDCCB ${found.pod.label} ${DASH} result proposal`,
+      title: `\uD83D\uDCCB ${found.pod.label} ${DASH} result`,
       description: [
         statLines(assignments, placements),
         "",
         verdict.notes ? `Notes: ${verdict.notes}` : null,
         warnings.length ? warnings.join("\n") : null,
+        confirmLine,
         `Submitted by <@${user.id}> \u00B7 session ${found.code}`,
       ].filter(Boolean).join("\n").slice(0, 4000),
       color: warnings.length ? 0xff8a3d : 0x28d17c,
       thumbnail: { url: att.url },
-      footer: { text: "Waiting for a moderator to confirm" },
+      footer: { text: threshold ? `Confirmations: 0/${threshold}` : "Waiting for an admin" },
     };
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("cbres:apply").setLabel("Apply result").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("cbres:reject").setLabel("Reject").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("cbres:apply").setLabel("Accept result").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("cbres:reject").setLabel("Reject (admin)").setStyle(ButtonStyle.Danger),
     );
     const proposal = await channel.send({ embeds: [embed], components: [row] });
     pending.set(proposal.id, {
       code: found.code, state: found.state, pod: found.pod,
       placements, assignments, verdict, embed,
       sha256: hash, screenshotUrl: att.url, submittedBy: user.username,
+      players: [...playersSet], threshold, votes: [],
     });
     pendingPods.add(found.pod.id);
-    console.log(`results: proposal for ${found.pod.id} (${found.code}): ${JSON.stringify(placements)} [${verdict.confidence}]`);
+    console.log(`results: proposal for ${found.pod.id} (${found.code}): ${JSON.stringify(placements)} [${verdict.confidence}] threshold=${threshold}`);
     return { ok: true, message: proposal };
+  }
+
+  // Push the accepted result into the bracket and commit stats.
+  async function applyResult(i, entry, appliedBy) {
+    const res = await fetch(`${WORKER}/bot/result`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Bot-Secret": ENV.BOT_SECRET },
+      body: JSON.stringify({ code: entry.code, podId: entry.pod.id, placements: entry.placements, editor: `${appliedBy} (via bot)` }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      await i.reply({ content: `Failed to apply: ${data.error || res.status}`, ephemeral: true });
+      return false;
+    }
+
+    // Stats are recorded only once the bracket has accepted the result. A
+    // failure here must never look like the result itself failed.
+    let statsNote = "";
+    if (ingest) {
+      try {
+        const out = ingest.commitMatch({
+          code: entry.code, state: entry.state, pod: entry.pod,
+          verdict: entry.verdict, assignments: entry.assignments, placements: entry.placements,
+          appliedBy, submittedBy: entry.submittedBy,
+          sha256: entry.sha256, screenshotUrl: entry.screenshotUrl,
+        });
+        statsNote = ` \u00B7 ${out.players} player stat lines recorded`;
+        console.log(`stats: committed match ${out.matchId} (${entry.code}/${entry.pod.id}): ${out.teams} teams, ${out.players} players`);
+      } catch (e) {
+        statsNote = " \u00B7 stats NOT recorded (see logs)";
+        console.error("stats: commit failed:", e.message);
+      }
+    }
+
+    const embed = { ...entry.embed, color: 0x28d17c, footer: { text: `\u2705 Confirmed by ${appliedBy}${statsNote}` } };
+    await i.update({ embeds: [embed], components: [] });
+    pending.delete(i.message.id);
+    pendingPods.delete(entry.pod.id);
+    return true;
   }
 
   async function onButton(i) {
     if (!i.isButton() || !i.customId.startsWith("cbres:")) return;
     const entry = pending.get(i.message.id);
     if (!entry) { await i.reply({ content: "This proposal has expired (bot restarted). Ask for a re-submit.", ephemeral: true }); return; }
-    if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-      await i.reply({ content: "Only moderators can confirm results.", ephemeral: true });
-      return;
-    }
-    if (i.customId === "cbres:apply") {
-      const res = await fetch(`${WORKER}/bot/result`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Bot-Secret": ENV.BOT_SECRET },
-        body: JSON.stringify({ code: entry.code, podId: entry.pod.id, placements: entry.placements, editor: `${i.user.username} (via bot)` }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        await i.reply({ content: `Failed to apply: ${data.error || res.status}`, ephemeral: true });
+    const isAdmin = i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild);
+    const uname = norm(i.user.username);
+    const isPlayer = (entry.players || []).includes(uname);
+
+    if (i.customId === "cbres:reject") {
+      if (!isAdmin) {
+        await i.reply({ content: "Only admins can reject. If this result is wrong, do not press Accept and ping a moderator.", ephemeral: true });
         return;
       }
-
-      // Stats are recorded only once the bracket has accepted the result. A
-      // failure here must never look like the result itself failed.
-      let statsNote = "";
-      if (ingest) {
-        try {
-          const out = ingest.commitMatch({
-            code: entry.code, state: entry.state, pod: entry.pod,
-            verdict: entry.verdict, assignments: entry.assignments, placements: entry.placements,
-            appliedBy: i.user.username, submittedBy: entry.submittedBy,
-            sha256: entry.sha256, screenshotUrl: entry.screenshotUrl,
-          });
-          statsNote = ` \u00B7 ${out.players} player stat lines recorded`;
-          console.log(`stats: committed match ${out.matchId} (${entry.code}/${entry.pod.id}): ${out.teams} teams, ${out.players} players`);
-        } catch (e) {
-          statsNote = " \u00B7 stats NOT recorded (see logs)";
-          console.error("stats: commit failed:", e.message);
-        }
-      }
-
-      const embed = { ...entry.embed, color: 0x28d17c, footer: { text: `\u2705 Applied by ${i.user.username}${statsNote}` } };
-      await i.update({ embeds: [embed], components: [] });
-    } else {
       const embed = { ...entry.embed, color: 0xff4d5e, footer: { text: `\u274C Rejected by ${i.user.username}` } };
       await i.update({ embeds: [embed], components: [] });
+      pending.delete(i.message.id);
+      pendingPods.delete(entry.pod.id);
+      return;
     }
-    pending.delete(i.message.id);
-    pendingPods.delete(entry.pod.id);
+
+    // Accept: one admin click applies instantly (even if the admin also
+    // plays); players accumulate votes until a strict majority is reached.
+    if (isAdmin) {
+      await applyResult(i, entry, `admin ${i.user.username}`);
+      return;
+    }
+    if (!isPlayer) {
+      await i.reply({ content: "Only players of this match (or an admin) can confirm its result.", ephemeral: true });
+      return;
+    }
+    if (entry.votes.includes(uname)) {
+      await i.reply({ content: "You already confirmed this result.", ephemeral: true });
+      return;
+    }
+    entry.votes.push(uname);
+    if (entry.votes.length >= entry.threshold) {
+      await applyResult(i, entry, `team confirmation (${entry.votes.length}/${entry.players.length} players)`);
+      return;
+    }
+    const embed = { ...entry.embed, footer: { text: `Confirmations: ${entry.votes.length}/${entry.threshold}` } };
+    entry.embed = embed;
+    await i.update({ embeds: [embed] });
   }
 
   client.on("interactionCreate", (i) => { onButton(i).catch((e) => console.error("results onButton:", e.message)); });
