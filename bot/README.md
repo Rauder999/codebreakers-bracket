@@ -41,7 +41,27 @@ Everything lives in `/opt/cb-bot`. Node 22, discord.js v14, systemd service `cb-
 | `.env` | Secrets (chmod 600): `DISCORD_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `BOT_SECRET` |
 | `state.json` | Persistence: which pods were already announced (no double-pings across restarts) |
 
-### 2.1 Match-ready pings (automatic)
+### 2.0 The start gate + host commands (added 2026-08-09)
+
+The bot stays **completely silent** until the host presses **Start Tournament**
+in the admin panel (which sets `tournamentStarted: true` in the session state).
+Before that, a bracket can be built, imported, and seeded with no pings and no
+threads. On start, every round-1 match is announced at once; later matches
+announce as they form.
+
+Host-facing Discord slash commands (Manage Server only):
+
+- `/tournament bind code:CB-XXXX` — run it **in the channel** you want that
+  tournament to use. All announcements and private match threads for that code
+  go there. Without a bind, the bot falls back to `config.announceChannelId`.
+- `/tournament roles [code] [role]` — create the tournament role and assign it to
+  every registered player (replaces the old "ask Rauder to run it" step).
+- `/tournament status` — list watched tournaments, started/not-started, bound
+  channel, and how many match threads exist.
+
+Per-tournament channel bindings live in `matches.json` under `channels`.
+
+### 2.1 Match-ready pings (after start)
 
 - Polls `GET {worker}/sessions/active` every 60s, opens a read-only WebSocket per live
   session (`/session/{code}/ws`), reconnects on drop.
@@ -90,9 +110,13 @@ the vision model. Then:
 4. Bot replies with a proposal embed (ranking, map cross-check vs the scheduled map,
    confidence, warnings) + **Apply result / Reject** buttons — moderators only
    (Manage Server permission).
-5. Apply → `POST {worker}/bot/result` with the `X-Bot-Secret` header → the Durable
-   Object applies placements, re-runs bracket propagation, broadcasts to all viewers —
-   and the match-ready pinger automatically announces the next formed match.
+5. **Confirmation (no mandatory moderator step, changed 2026-08-09).** The proposal
+   shows an **Accept result** button. A strict majority of the match's registered
+   players — `floor(n/2)+1` — must press it (e.g. 6 players → 4, 12 → 7), **or** a
+   single admin (Manage Server) click applies it instantly. **Reject** is admin-only.
+6. On confirmation → `POST {worker}/bot/result` with the `X-Bot-Secret` header → the
+   Durable Object applies placements, re-runs bracket propagation, broadcasts to all
+   viewers — and the match-ready pinger automatically announces the next formed match.
 
 Cost: ~$0.03–0.06 per screenshot (Anthropic API, billed to Rauder's key).
 
