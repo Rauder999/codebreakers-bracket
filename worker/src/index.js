@@ -343,6 +343,8 @@ export default {
           name,
           players: [text(pr["Player 1 Embark"]), text(pr["Player 2 Embark"]), text(pr["Player 3 Embark"]), text(pr["Sub Embark"])].filter(Boolean),
           discords: [text(pr["Player 1 Discord"]), text(pr["Player 2 Discord"]), text(pr["Player 3 Discord"]), text(pr["Sub Discord"])].filter(Boolean),
+          // Team's highest ranked score (e.g. 50000) - used for seeding.
+          rank: (pr["Highest Rank Score"] && typeof pr["Highest Rank Score"].number === "number") ? pr["Highest Rank Score"].number : null,
           status: (pr["Status"] && pr["Status"].select && pr["Status"].select.name) || "Pending",
           tournament: (pr["Tournament"] && pr["Tournament"].select && pr["Tournament"].select.name) || null,
           submittedAt: page.created_time,

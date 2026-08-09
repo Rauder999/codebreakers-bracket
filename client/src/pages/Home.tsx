@@ -1258,14 +1258,18 @@ export default function Home() {
       const res = await fetch(`${WORKER_URL}/registrations${qs}`, { headers: { Authorization: `Bearer ${adminToken}` } });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      const teams: { name: string; players: string[]; discords: string[]; status: string }[] = data.teams || [];
+      const teams: { name: string; players: string[]; discords: string[]; status: string; rank?: number | null }[] = data.teams || [];
       if (teams.length === 0) { toast.warning("No registrations found in Notion"); return; }
+      // Seed by ranked score, highest first; teams without a rank go last in
+      // submission order.
+      teams.sort((a, b) => (b.rank ?? -1) - (a.rank ?? -1));
       const result: SeedEntry[] = teams.slice(0, tournamentSize).map((t, i) => ({ name: t.name.slice(0, 24), seed: i + 1, players: t.players, discords: t.discords }));
       while (result.length < tournamentSize) result.push({ name: `TBD ${result.length + 1}`, seed: result.length + 1, players: [], discords: [] });
       setSeeds(result);
       const pending = teams.filter((t) => t.status === "Pending").length;
       const over = teams.length > tournamentSize ? ` (${teams.length - tournamentSize} over the limit, dropped)` : "";
-      toast.success(`Imported ${Math.min(teams.length, tournamentSize)} teams from Notion${over}${pending ? ` · ${pending} still Pending` : ""}`);
+      const ranked = teams.filter((t) => t.rank != null).length;
+      toast.success(`Imported ${Math.min(teams.length, tournamentSize)} teams from Notion${ranked ? ` · seeded by rank (${ranked} ranked)` : ""}${over}${pending ? ` · ${pending} still Pending` : ""}`);
     } catch (e) {
       toast.error(`Notion import failed: ${e instanceof Error ? e.message : String(e)}`);
     }
