@@ -159,8 +159,9 @@ function seedsFromImport(
   const teams = rows.slice(1).map(r => ({
     name: (r[nameCol] || "").trim(),
     strength: parseFloat(r[strengthCol]) || 0,
-    players: playerCols.map(c => (r[c] || "").trim()).filter(Boolean),
-    discords: discordCols.map(c => (r[c] || "").trim()).filter(Boolean),
+    // A cell may hold one entry or a comma-separated list - accept both.
+    players: playerCols.flatMap(c => (r[c] || "").split(",")).map(v => v.trim()).filter(Boolean),
+    discords: discordCols.flatMap(c => (r[c] || "").split(",")).map(v => v.trim()).filter(Boolean),
   })).filter(t => t.name);
   teams.sort((a, b) => b.strength - a.strength);
   const result = teams.slice(0, size).map((t, i) => ({ name: t.name, seed: i + 1, players: t.players, discords: t.discords }));

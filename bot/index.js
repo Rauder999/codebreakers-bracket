@@ -33,6 +33,9 @@ const client = new Client({
 
 // Same normalization as the bracket worker: lowercase, no @, no #discriminator.
 const norm = (s) => String(s || "").toLowerCase().trim().replace(/^@/, "").split("#")[0];
+// Roster discords sometimes arrive as one comma-joined string (CSV cell with
+// the whole team in it) - always expand before matching.
+const splitDiscords = (arr) => (arr || []).flatMap((d) => String(d).split(",")).map((d) => d.trim()).filter(Boolean);
 
 async function mainGuild() {
   const g = client.guilds.cache.first();
@@ -118,7 +121,7 @@ async function announce(code, s, pod) {
   const names = pod.teams.map((t) => t.name);
   const mentions = [];
   for (const teamName of names) {
-    for (const d of byTeam.get(teamName) || []) {
+    for (const d of splitDiscords(byTeam.get(teamName))) {
       const m = g ? findMember(g, d) : null;
       mentions.push(m ? `<@${m.id}>` : `@${norm(d)}`);
     }
@@ -165,7 +168,7 @@ async function syncRoles(code, roleName) {
   if (!role) role = await g.roles.create({ name, mentionable: true, reason: `CodeBreakers ${code}` });
   let added = 0; const missing = [];
   for (const seed of s.seeds || []) {
-    for (const d of seed.discords || []) {
+    for (const d of splitDiscords(seed.discords)) {
       const m = findMember(g, d);
       if (!m) { missing.push(`${seed.name}: ${d}`); continue; }
       if (!m.roles.cache.has(role.id)) { await m.roles.add(role); added++; }

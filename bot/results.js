@@ -56,7 +56,9 @@ module.exports = function setupResults(ctx) {
       if (!s || !Array.isArray(s.pods)) continue;
       const myTeams = new Set();
       for (const seed of s.seeds || []) {
-        if ((seed.discords || []).some((d) => norm(d) === uname)) myTeams.add(seed.name);
+        // Discords may be one comma-joined string per team - expand first.
+        const list = (seed.discords || []).flatMap((d) => String(d).split(","));
+        if (list.some((d) => norm(d) === uname)) myTeams.add(seed.name);
       }
       if (!myTeams.size) continue;
       for (const pod of s.pods) {

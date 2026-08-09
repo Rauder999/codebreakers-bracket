@@ -50,11 +50,13 @@ module.exports = function setupMatches(ctx) {
   const bansEnabled = () => CFG.mapBans !== false;
 
   // ---- roster helpers ------------------------------------------------------
+  // Discords may arrive as one comma-joined string per team - expand first.
+  const splitDiscords = (arr) => (arr || []).flatMap((d) => String(d).split(",")).map(norm).filter(Boolean);
   function rostersOf(s, pod) {
     const out = {};
     for (const t of pod.teams) {
       const seed = (s.seeds || []).find((sd) => sd.name === t.name);
-      out[t.name] = (seed && seed.discords ? seed.discords : []).map(norm).filter(Boolean);
+      out[t.name] = splitDiscords(seed && seed.discords);
     }
     return out;
   }
