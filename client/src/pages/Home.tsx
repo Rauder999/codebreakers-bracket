@@ -985,6 +985,8 @@ export default function Home() {
     setTournamentSize(s);
     setSeeds(defaultSeeds(s));
     setFormatConfig({});
+    // Mini-brackets are structurally single-elimination.
+    if (s < 8) { setTournamentMode("single"); setFinalsBracket(false); }
   };
 
   const handleNameChange = (idx: number, val: string) => {
@@ -1513,9 +1515,14 @@ export default function Home() {
                 <span className="mode-btn-title">Single Elimination</span>
                 <span className="mode-btn-desc">Lose once — you're out. Fast format.</span>
               </button>
-              <button className={`mode-btn${tournamentMode === "double" ? " active de" : ""}`} onClick={() => setTournamentMode("double")}>
+              <button
+                className={`mode-btn${tournamentMode === "double" ? " active de" : ""}`}
+                disabled={tournamentSize < 8}
+                style={tournamentSize < 8 ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+                onClick={() => tournamentSize >= 8 && setTournamentMode("double")}
+              >
                 <span className="mode-btn-title">Double Elimination</span>
-                <span className="mode-btn-desc">3rd/4th drop to Losers Bracket · 2 chances</span>
+                <span className="mode-btn-desc">{tournamentSize < 8 ? "Needs 8+ teams" : "3rd/4th drop to Losers Bracket · 2 chances"}</span>
               </button>
             </div>
           </div>
@@ -1524,7 +1531,7 @@ export default function Home() {
           <div className="setup-step">
             <div className="step-head"><span className="step-num">02</span><span className="step-title">Size</span><span className="step-hint">teams in the bracket</span></div>
             <div className="size-selector">
-              {([8, 16, 32] as const).map((s) => (
+              {([2, 4, 8, 16, 32] as const).map((s) => (
                 <button key={s} className={`size-btn${tournamentSize === s ? " active" : ""}`} onClick={() => handleSizeChange(s)}>{s}</button>
               ))}
             </div>

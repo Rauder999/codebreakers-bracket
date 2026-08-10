@@ -108,15 +108,19 @@ the vision model. Then:
    matched against the rosters (Embark IDs) we provide in the prompt. Mid-round
    scoreboards are accepted but flagged in notes with lowered confidence.
 4. Bot replies with a proposal embed (ranking, map cross-check vs the scheduled map,
-   confidence, warnings) + **Apply result / Reject** buttons — moderators only
-   (Manage Server permission).
-5. **Confirmation (no mandatory moderator step, changed 2026-08-09).** The proposal
-   shows an **Accept result** button. A strict majority of the match's registered
-   players — `floor(n/2)+1` — must press it (e.g. 6 players → 4, 12 → 7), **or** a
-   single admin (Manage Server) click applies it instantly. **Reject** is admin-only.
-6. On confirmation → `POST {worker}/bot/result` with the `X-Bot-Secret` header → the
+   confidence, warnings) + **Accept result / Reject** buttons.
+5. **Confirmation (one per team + auto-apply, changed 2026-08-10).** ONE player from
+   EACH team presses **Accept result** (the button counts at most one confirmation
+   per team; the embed footer tracks `Teams confirmed: k/N`). If not every team has
+   confirmed within **60 seconds** (`resultConfirmSec` in config.json to override),
+   the result **auto-applies** on timeout. An admin (Manage Server) click still
+   applies instantly; **Reject** is admin-only and cancels the timer.
+6. On apply → `POST {worker}/bot/result` with the `X-Bot-Secret` header → the
    Durable Object applies placements, re-runs bracket propagation, broadcasts to all
    viewers — and the match-ready pinger automatically announces the next formed match.
+7. **Dispute.** The applied message keeps a **Dispute** button: any participant can
+   press it to ping the admins (`adminDiscordIds` in config.json, falls back to
+   `stats.adminDiscordIds`) — it does NOT revert the bracket, a human sorts it out.
 
 Cost: ~$0.03–0.06 per screenshot (Anthropic API, billed to Rauder's key).
 

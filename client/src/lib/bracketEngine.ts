@@ -12,7 +12,7 @@ export type Placement = 0 | 1 | 2 | 3 | 4;
 export type TournamentMode = "single" | "double";
 export type PodSize = 2 | 4;
 export type Bracket = "wb" | "lb" | "gf";
-export type Size = 8 | 16 | 32;
+export type Size = 2 | 4 | 8 | 16 | 32;
 
 export interface TeamSlot {
   name: string;
@@ -93,10 +93,21 @@ function applyFinalsBracket(graph: PhaseSpec[], opts?: EngineOptions): PhaseSpec
 }
 
 export function getPhaseGraph(size: Size, mode: TournamentMode, opts?: EngineOptions): PhaseSpec[] {
+  // Mini-brackets (2/4 teams) have no room for a finals-bracket insert.
+  if (size < 8) return getBasePhaseGraph(size, mode);
   return applyFinalsBracket(getBasePhaseGraph(size, mode), opts);
 }
 
 function getBasePhaseGraph(size: Size, mode: TournamentMode): PhaseSpec[] {
+  // 2 and 4 teams are always effectively single-elimination, whatever the mode.
+  if (size === 4) return [
+    { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 4, advanceTo: "gf", isGroups: true },
+    { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2 },
+  ];
+  if (size === 2) return [
+    // The only phase doubles as the seeded round, hence isGroups.
+    { id: "gf", label: "GRAND FINAL", bracket: "gf", inputCount: 2, isGroups: true },
+  ];
   if (mode === "single") {
     if (size === 8) return [
       { id: "groups", label: "GROUP STAGE", bracket: "wb", inputCount: 8, advanceTo: "final", isGroups: true },

@@ -809,6 +809,14 @@
 
     // ─── Phase graph (MUST match bracketEngine.ts exactly) ────────────────────
     function getPhaseGraph(size, mode) {
+      // 2/4-team mini-brackets are always single-elim (matches engine).
+      if (size === 4) return [
+        { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"gf" },
+        { id:"gf",label:"GRAND FINAL",bracket:"gf" },
+      ];
+      if (size === 2) return [
+        { id:"gf",label:"GRAND FINAL",bracket:"gf" },
+      ];
       if (mode !== "double") {
         if (size === 8)  return [
           { id:"groups",label:"GROUP STAGE",bracket:"wb",advanceTo:"final" },

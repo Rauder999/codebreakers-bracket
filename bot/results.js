@@ -137,21 +137,22 @@ module.exports = function setupResults(ctx) {
     const outsiders = assignments.filter((a) => !a.team).length;
     if (outsiders) warnings.push(`${INFO} ${outsiders} squad(s) on screen are not in this match; placements were taken from the relative order of the tournament teams`);
 
-    // Player confirmation instead of moderator review: a strict majority of
-    // the match's registered players (floor(n/2)+1) must press Accept - or a
-    // single admin click applies it immediately.
-    const playersSet = new Set();
+    // Team confirmation: ONE player from EACH team presses Accept. If not all
+    // teams confirm within 60 seconds, the result auto-applies. A Dispute
+    // button stays on the applied message and pings the admins.
+    const teamRosters = {};
     for (const t of found.pod.teams) {
       const seed = (found.state.seeds || []).find((sd) => sd.name === t.name);
-      for (const d of ((seed && seed.discords) || []).flatMap((x) => String(x).split(","))) {
-        const n = norm(d);
-        if (n) playersSet.add(n);
-      }
+      teamRosters[t.name] = ((seed && seed.discords) || [])
+        .flatMap((x) => String(x).split(","))
+        .map(norm)
+        .filter(Boolean);
     }
-    const threshold = playersSet.size ? Math.floor(playersSet.size / 2) + 1 : 0;
-    const confirmLine = threshold
-      ? `Players of this match: press **Accept result** to confirm (${threshold} of ${playersSet.size} needed) \u2014 or one admin click applies it instantly.`
-      : `Waiting for an admin to confirm (no registered players found for this match).`;
+    const confirmableTeams = Object.keys(teamRosters).filter((t) => teamRosters[t].length);
+    const confirmSec = Number(CFG.resultConfirmSec) > 0 ? Number(CFG.resultConfirmSec) : 60;
+    const confirmLine = confirmableTeams.length
+      ? `One player from **each team**: press **Accept result** to confirm. If not everyone confirms, the result auto-applies in ${confirmSec}s. An admin click applies it instantly.`
+      : `Auto-applying in ${confirmSec}s (no registered players found) \u2014 an admin click applies it instantly.`;
 
     const embed = {
       title: `\uD83D\uDCCB ${found.pod.label} ${DASH} result`,
@@ -165,26 +166,37 @@ module.exports = function setupResults(ctx) {
       ].filter(Boolean).join("\n").slice(0, 4000),
       color: warnings.length ? 0xff8a3d : 0x28d17c,
       thumbnail: { url: att.url },
-      footer: { text: threshold ? `Confirmations: 0/${threshold}` : "Waiting for an admin" },
+      footer: { text: confirmableTeams.length ? `Teams confirmed: 0/${confirmableTeams.length} \u00B7 auto-apply in ${confirmSec}s` : `Auto-apply in ${confirmSec}s` },
     };
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("cbres:apply").setLabel("Accept result").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("cbres:reject").setLabel("Reject (admin)").setStyle(ButtonStyle.Danger),
     );
     const proposal = await channel.send({ embeds: [embed], components: [row] });
-    pending.set(proposal.id, {
+    const entry = {
       code: found.code, state: found.state, pod: found.pod,
       placements, assignments, verdict, embed,
       sha256: hash, screenshotUrl: att.url, submittedBy: user.username,
-      players: [...playersSet], threshold, votes: [],
-    });
+      teamRosters, confirmableTeams, confirmedTeams: [],
+      channelId: proposal.channelId, messageId: proposal.id, timer: null,
+    };
+    entry.timer = setTimeout(() => {
+      applyResult(entry, "auto-confirmation (timeout)", null)
+        .catch((e) => console.error("results auto-apply:", e.message));
+    }, confirmSec * 1000);
+    pending.set(proposal.id, entry);
     pendingPods.add(found.pod.id);
-    console.log(`results: proposal for ${found.pod.id} (${found.code}): ${JSON.stringify(placements)} [${verdict.confidence}] threshold=${threshold}`);
+    console.log(`results: proposal for ${found.pod.id} (${found.code}): ${JSON.stringify(placements)} [${verdict.confidence}] teams=${confirmableTeams.length} autoApply=${confirmSec}s`);
     return { ok: true, message: proposal };
   }
 
-  // Push the accepted result into the bracket and commit stats.
-  async function applyResult(i, entry, appliedBy) {
+  // Applied results kept around so the Dispute button works after apply.
+  const applied = new Map(); // message id -> { code, podId, label, disputed }
+
+  // Push the accepted result into the bracket and commit stats. `i` is the
+  // triggering interaction, or null when the auto-confirm timer fires.
+  async function applyResult(entry, appliedBy, i) {
+    if (!pending.has(entry.messageId)) return false; // already applied/rejected
     const res = await fetch(`${WORKER}/bot/result`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Bot-Secret": ENV.BOT_SECRET },
@@ -192,7 +204,8 @@ module.exports = function setupResults(ctx) {
     });
     const data = await res.json();
     if (!data.ok) {
-      await i.reply({ content: `Failed to apply: ${data.error || res.status}`, ephemeral: true });
+      console.error(`results: apply failed for ${entry.pod.id}: ${data.error || res.status}`);
+      if (i) await i.reply({ content: `Failed to apply: ${data.error || res.status}`, ephemeral: true });
       return false;
     }
 
@@ -215,26 +228,61 @@ module.exports = function setupResults(ctx) {
       }
     }
 
+    if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
     const embed = { ...entry.embed, color: 0x28d17c, footer: { text: `\u2705 Confirmed by ${appliedBy}${statsNote}` } };
-    await i.update({ embeds: [embed], components: [] });
-    pending.delete(i.message.id);
+    const disputeRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("cbres:dispute").setLabel("Dispute").setStyle(ButtonStyle.Secondary),
+    );
+    const payload = { embeds: [embed], components: [disputeRow] };
+    if (i) {
+      await i.update(payload);
+    } else {
+      try {
+        const ch = await client.channels.fetch(entry.channelId);
+        const msg = await ch.messages.fetch(entry.messageId);
+        await msg.edit(payload);
+      } catch (e) { console.error("results: message edit after auto-apply failed:", e.message); }
+    }
+    applied.set(entry.messageId, { code: entry.code, podId: entry.pod.id, label: entry.pod.label, disputed: false });
+    pending.delete(entry.messageId);
     pendingPods.delete(entry.pod.id);
     return true;
   }
 
+  const adminIds = () => CFG.adminDiscordIds || (CFG.stats && CFG.stats.adminDiscordIds) || [];
+
+  async function onDispute(i) {
+    const info = applied.get(i.message.id);
+    if (!info) { await i.reply({ content: "This result is no longer tracked (bot restarted). Ping a moderator directly.", ephemeral: true }); return; }
+    const pings = adminIds().map((id) => `<@${id}>`).join(" ");
+    await i.reply({
+      content: `\u26A0\uFE0F ${pings || "Moderators:"} the result of **${info.label}** is disputed by <@${i.user.id}>. Please review.`,
+      allowedMentions: { users: [...adminIds(), i.user.id] },
+    });
+    if (!info.disputed) {
+      info.disputed = true;
+      try {
+        const embed = { ...(i.message.embeds[0] ? i.message.embeds[0].toJSON() : {}), color: 0xff8a3d, footer: { text: `\u26A0\uFE0F Disputed by ${i.user.username}` } };
+        await i.message.edit({ embeds: [embed], components: [] });
+      } catch (e) { console.error("results: dispute edit failed:", e.message); }
+    }
+  }
+
   async function onButton(i) {
     if (!i.isButton() || !i.customId.startsWith("cbres:")) return;
+    if (i.customId === "cbres:dispute") { await onDispute(i); return; }
     const entry = pending.get(i.message.id);
     if (!entry) { await i.reply({ content: "This proposal has expired (bot restarted). Ask for a re-submit.", ephemeral: true }); return; }
     const isAdmin = i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild);
     const uname = norm(i.user.username);
-    const isPlayer = (entry.players || []).includes(uname);
+    const myTeam = (entry.confirmableTeams || []).find((t) => entry.teamRosters[t].includes(uname)) || null;
 
     if (i.customId === "cbres:reject") {
       if (!isAdmin) {
-        await i.reply({ content: "Only admins can reject. If this result is wrong, do not press Accept and ping a moderator.", ephemeral: true });
+        await i.reply({ content: "Only admins can reject. If this result is wrong, press nothing and ping a moderator.", ephemeral: true });
         return;
       }
+      if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
       const embed = { ...entry.embed, color: 0xff4d5e, footer: { text: `\u274C Rejected by ${i.user.username}` } };
       await i.update({ embeds: [embed], components: [] });
       pending.delete(i.message.id);
@@ -242,26 +290,26 @@ module.exports = function setupResults(ctx) {
       return;
     }
 
-    // Accept: one admin click applies instantly (even if the admin also
-    // plays); players accumulate votes until a strict majority is reached.
+    // Accept: an admin click applies instantly; otherwise one player from each
+    // team. The 60s timer applies it anyway if teams are slow.
     if (isAdmin) {
-      await applyResult(i, entry, `admin ${i.user.username}`);
+      await applyResult(entry, `admin ${i.user.username}`, i);
       return;
     }
-    if (!isPlayer) {
+    if (!myTeam) {
       await i.reply({ content: "Only players of this match (or an admin) can confirm its result.", ephemeral: true });
       return;
     }
-    if (entry.votes.includes(uname)) {
-      await i.reply({ content: "You already confirmed this result.", ephemeral: true });
+    if (entry.confirmedTeams.includes(myTeam)) {
+      await i.reply({ content: `**${myTeam}** has already confirmed.`, ephemeral: true });
       return;
     }
-    entry.votes.push(uname);
-    if (entry.votes.length >= entry.threshold) {
-      await applyResult(i, entry, `team confirmation (${entry.votes.length}/${entry.players.length} players)`);
+    entry.confirmedTeams.push(myTeam);
+    if (entry.confirmedTeams.length >= entry.confirmableTeams.length) {
+      await applyResult(entry, `all teams (${entry.confirmedTeams.length}/${entry.confirmableTeams.length})`, i);
       return;
     }
-    const embed = { ...entry.embed, footer: { text: `Confirmations: ${entry.votes.length}/${entry.threshold}` } };
+    const embed = { ...entry.embed, footer: { text: `Teams confirmed: ${entry.confirmedTeams.length}/${entry.confirmableTeams.length} (${entry.confirmedTeams.join(", ")}) \u00B7 auto-apply pending` } };
     entry.embed = embed;
     await i.update({ embeds: [embed] });
   }
