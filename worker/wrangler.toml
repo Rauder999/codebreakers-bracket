@@ -21,5 +21,6 @@ new_sqlite_classes = ["SessionRoom"]
 # NOTE: [vars] must stay last — top-level keys after it would be swallowed into the table.
 [vars]
 DISCORD_CLIENT_ID = "1529573475650371919"
-# "CODE Tournament Registrations" database (Notion). Token: `npx wrangler secret put NOTION_TOKEN`
-NOTION_DB_ID = "abeee4339fe3422ba8bc224974196f92"
+# "CBL Tournament Registrations" database (Notion form responses).
+# Token: `npx wrangler secret put NOTION_TOKEN`
+NOTION_DB_ID = "3b7828323edb8021ba48d1172bbec7e5"

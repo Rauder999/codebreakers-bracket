@@ -318,14 +318,11 @@ export default {
       const idn = await resolveIdentity(bearer(request), env);
       if (idn.kind !== "master" && idn.kind !== "account") return json({ ok: false, error: "Unauthorized" }, 401);
       if (!env.NOTION_TOKEN || !env.NOTION_DB_ID) return json({ ok: false, error: "Notion import is not configured yet" }, 503);
-      const tournament = url.searchParams.get("tournament") || "";
-      const filters = [{ property: "Status", select: { does_not_equal: "Rejected" } }];
-      if (tournament) filters.push({ property: "Tournament", select: { equals: tournament } });
       const res = await fetch(`https://api.notion.com/v1/databases/${env.NOTION_DB_ID}/query`, {
         method: "POST",
         headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": "2022-06-28", "Content-Type": "application/json" },
         body: JSON.stringify({
-          filter: filters.length > 1 ? { and: filters } : filters[0],
+          filter: { property: "Status", select: { does_not_equal: "Rejected" } },
           sorts: [{ timestamp: "created_time", direction: "ascending" }],
           page_size: 100,
         }),
@@ -336,17 +333,19 @@ export default {
       }
       const data = await res.json();
       const text = (p) => ((p && p.rich_text) || []).map((t) => t.plain_text).join("").trim();
+      const num = (p) => (p && typeof p.number === "number") ? p.number : null;
       const teams = (data.results || []).map((page) => {
         const pr = page.properties || {};
-        const name = ((pr["Team Name"] && pr["Team Name"].title) || []).map((t) => t.plain_text).join("").trim();
+        const name = ((pr["Team name"] && pr["Team name"].title) || []).map((t) => t.plain_text).join("").trim();
+        // The form asks per-player ranks; the team is seeded by their sum.
+        const ranks = [num(pr["Captain Highest Rank"]), num(pr["Player 1 Highest Rank"]), num(pr["Player 2 Highest Rank"])].filter((r) => r != null);
         return {
           name,
-          players: [text(pr["Player 1 Embark"]), text(pr["Player 2 Embark"]), text(pr["Player 3 Embark"]), text(pr["Sub Embark"])].filter(Boolean),
-          discords: [text(pr["Player 1 Discord"]), text(pr["Player 2 Discord"]), text(pr["Player 3 Discord"]), text(pr["Sub Discord"])].filter(Boolean),
-          // Team's highest ranked score (e.g. 50000) - used for seeding.
-          rank: (pr["Highest Rank Score"] && typeof pr["Highest Rank Score"].number === "number") ? pr["Highest Rank Score"].number : null,
+          players: [text(pr["Captain Embark ID"]), text(pr["Player 1 Embark ID"]), text(pr["Player 2 Embark ID"])].filter(Boolean),
+          discords: [text(pr["Captain Discord"]), text(pr["Player 1 Discord"]), text(pr["Player 2 Discord"])].filter(Boolean),
+          rank: ranks.length ? ranks.reduce((a, b) => a + b, 0) : null,
           status: (pr["Status"] && pr["Status"].select && pr["Status"].select.name) || "Pending",
-          tournament: (pr["Tournament"] && pr["Tournament"].select && pr["Tournament"].select.name) || null,
+          tournament: null,
           submittedAt: page.created_time,
         };
       }).filter((t) => t.name);
