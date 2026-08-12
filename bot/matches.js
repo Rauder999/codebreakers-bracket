@@ -67,12 +67,44 @@ module.exports = function setupMatches(ctx) {
     }
     return out;
   }
+  // Rosters straight from the live bracket state when available, so admin
+  // fixes to discords mid-tournament apply to bans/submissions immediately.
+  // The snapshot stored on the entry is only a fallback (session vanished).
+  function liveRosters(entry) {
+    const sEntry = sessions.get(entry.code);
+    const s = sEntry && sEntry.lastState;
+    const pod = s && Array.isArray(s.pods) ? s.pods.find((p) => p.id === entry.podId) : null;
+    if (pod) {
+      const fresh = rostersOf(s, pod);
+      if (Object.values(fresh).some((l) => l.length)) return fresh;
+    }
+    return entry.rosters || {};
+  }
   function teamOfUser(entry, username) {
     const u = norm(username);
-    for (const [team, list] of Object.entries(entry.rosters || {})) {
+    for (const [team, list] of Object.entries(liveRosters(entry))) {
       if (list.includes(u)) return team;
     }
     return null;
+  }
+
+  // Discord offers exactly one quiet way into a private thread: mentions added
+  // by EDITING a message pull the users in without any notification. A fresh
+  // send would ping; thread.members.add() pings "you were added" per player.
+  async function silentAddMembers(thread, discords) {
+    const g = await mainGuild();
+    const mentions = [];
+    for (const d of discords) {
+      const m = g ? findMember(g, d) : null;
+      if (m) mentions.push(`<@${m.id}>`);
+    }
+    if (!mentions.length) return 0;
+    try {
+      const msg = await thread.send({ content: "\u200B" });
+      await msg.edit({ content: mentions.join(" ") });
+      await msg.delete();
+    } catch (e) { console.error("matches: silent add failed:", e.message); }
+    return mentions.length;
   }
   // Best seed first; unseeded teams last, stable by name.
   function seedOrder(teams) {
@@ -152,7 +184,6 @@ module.exports = function setupMatches(ctx) {
     const parentId = channelFor(code);
     if (!parentId) return null;
     const parent = await client.channels.fetch(parentId);
-    const g = await mainGuild();
 
     const ordered = seedOrder(pod.teams);
     const name = `${pod.label}: ${ordered.map((t) => t.name).join(" vs ")}`.slice(0, 100);
@@ -165,14 +196,6 @@ module.exports = function setupMatches(ctx) {
     });
 
     const rosters = rostersOf(s, pod);
-    const mentions = [];
-    for (const list of Object.values(rosters)) {
-      for (const d of list) {
-        const m = g ? findMember(g, d) : null;
-        if (!m) continue;
-        try { await thread.members.add(m.id); mentions.push(`<@${m.id}>`); } catch (e) { console.error("matches: add member failed:", e.message); }
-      }
-    }
 
     const entry = {
       key: k, code, podId: pod.id, threadId: thread.id,
@@ -186,8 +209,12 @@ module.exports = function setupMatches(ctx) {
     byThread.set(thread.id, k);
     save();
 
+    // Players join silently: the channel announcement is the single ping they
+    // get; the thread itself must not fire a second wave of notifications.
+    const added = await silentAddMembers(thread, Object.values(rosters).flat());
+    if (!added) console.error(`matches: no members resolved for ${k} - check discords in the bracket`);
+
     await thread.send({
-      content: mentions.join(" ") || undefined,
       embeds: [{
         title: `${SWORDS} ${entry.label}`,
         description: [
@@ -214,6 +241,30 @@ module.exports = function setupMatches(ctx) {
     }
     console.log(`matches: thread ${thread.id} for ${k} (${entry.order.join(" vs ")})`);
     return thread;
+  }
+
+  // Called on every state snapshot: when the admin fixes a team's discords
+  // mid-tournament, refresh the stored rosters of that session's threads and
+  // quietly pull newly added players into their thread. Nothing is re-pinged.
+  async function onStateUpdate(code, s) {
+    if (!s || !Array.isArray(s.pods)) return;
+    for (const entry of Object.values(store.threads)) {
+      if (entry.code !== code) continue;
+      const pod = s.pods.find((p) => p.id === entry.podId);
+      if (!pod) continue;
+      const fresh = rostersOf(s, pod);
+      if (JSON.stringify(fresh) === JSON.stringify(entry.rosters)) continue;
+      const known = new Set(Object.values(entry.rosters || {}).flat());
+      const added = Object.values(fresh).flat().filter((d) => !known.has(d));
+      entry.rosters = fresh;
+      save();
+      if (!added.length) continue;
+      try {
+        const thread = await client.channels.fetch(entry.threadId);
+        const n = await silentAddMembers(thread, added);
+        if (n) console.log(`matches: roster fix pulled ${n} player(s) into ${entry.key}`);
+      } catch (e) { console.error("matches: roster sync failed:", e.message); }
+    }
   }
 
   async function finalizeMap(entry, thread) {
@@ -432,5 +483,5 @@ module.exports = function setupMatches(ctx) {
   client.on("messageCreate", (m) => { onMessage(m).catch((e) => console.error("matches onMessage:", e.message)); });
 
   console.log("matches: threads " + (CFG.matchThreads === false ? "OFF" : "ON") + ", map bans " + (bansEnabled() ? "ON" : "OFF"));
-  return { onMatchReady, registerCommands, channelFor };
+  return { onMatchReady, onStateUpdate, registerCommands, channelFor };
 };

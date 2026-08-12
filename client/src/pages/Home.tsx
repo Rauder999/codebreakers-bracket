@@ -2104,6 +2104,7 @@ export default function Home() {
               <button className="cb-btn success" style={{ padding: "2px 7px", fontSize: 10 }} onClick={() => { navigator.clipboard.writeText(`https://rauder999.github.io/codebreakers-bracket/live.html?session=${sessionCode}`); toast.success("Live link copied!"); }}>Live Link</button>
               {authKind !== "cohost" && <button className="cb-btn accent" style={{ padding: "2px 7px", fontSize: 10 }} onClick={() => sessionCode && shareSession(sessionCode)}>Share</button>}
               <button className="cb-btn ghost" style={{ padding: "2px 7px", fontSize: 10 }} onClick={handleLeaveSession}>Leave</button>
+              {authKind !== "cohost" && <button className="cb-btn danger" style={{ padding: "2px 7px", fontSize: 10 }} title="Delete this tournament session (archives and player stats are kept)" onClick={() => sessionCode && requestDeleteSession(sessionCode)}>Delete</button>}
             </div>
           )}
           <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-muted)", opacity: 0.6, letterSpacing: "0.06em", marginLeft: 4 }}>CTRL+Z UNDO · CTRL+Y REDO</span>

@@ -103,6 +103,13 @@ async function onState(code, entry, stateStr) {
     savePersisted();
     await announce(code, s, pod);
   }
+
+  // Mid-tournament roster fixes: let matches.js refresh thread rosters and
+  // quietly add players whose discords were just corrected by the admin.
+  if (matchesApi && matchesApi.onStateUpdate) {
+    try { await matchesApi.onStateUpdate(code, s); }
+    catch (e) { console.error("matches roster sync:", e.message); }
+  }
 }
 
 async function announce(code, s, pod) {
