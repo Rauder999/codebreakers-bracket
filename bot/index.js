@@ -2,6 +2,7 @@
 // CodeBreakers Discord bot \u2014 v1
 //   \u2022 Match-ready pings: watches live bracket sessions over WebSocket and
 //     pings team members when their next match is formed.
+//   \u2022 Moderator management from Discord (/mod add|remove|list, see mods.js).
 //   \u2022 Tournament role sync (one-shot CLI):
 //       node index.js sync-roles CB-XXXX ["Role Name"]
 // Config: config.json (worker URL, announce channel). Token: .env next to it.
@@ -176,18 +177,22 @@ async function syncRoles(code, roleName) {
 }
 
 // \u2500\u2500\u2500 Modules \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-// results: vision + moderator confirmation + stats. matches: per-match private
-// threads, map bans, and the only paths that may submit a screenshot.
-let resultsApi = null, matchesApi = null;
+// mods: /mod moderator management, asked "who is a moderator?" by the other
+// two. results: vision + moderator confirmation + stats. matches: per-match
+// private threads, map bans, and the only paths that may submit a screenshot.
+const [, , cmd, arg1, arg2] = process.argv;
+let modsApi = null, resultsApi = null, matchesApi = null;
 try {
-  resultsApi = require("./results")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild });
+  modsApi = require("./mods")({ client, CFG, cliMode: !!cmd });
+} catch (e) { console.error("mods module failed to load:", e.message); }
+try {
+  resultsApi = require("./results")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild, mods: modsApi });
 } catch (e) { console.error("results module failed to load:", e.message); }
 try {
-  matchesApi = require("./matches")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results: resultsApi, syncRoles });
+  matchesApi = require("./matches")({ client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results: resultsApi, syncRoles, mods: modsApi });
 } catch (e) { console.error("matches module failed to load:", e.message); }
 
 // \u2500\u2500\u2500 Entrypoint \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-const [, , cmd, arg1, arg2] = process.argv;
 client.once("clientReady", async () => {
   console.log(`logged in as ${client.user.tag}; guilds: ${[...client.guilds.cache.values()].map((g) => g.name).join(", ") || "none"}`);
   if (matchesApi && cmd !== "sync-roles") {

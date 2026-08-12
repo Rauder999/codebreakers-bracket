@@ -35,7 +35,11 @@ const DASH = "\u2014", DOT = "\u00B7", BAN = "\uD83D\uDEAB", SWORDS = "\u2694\uF
 const CAMERA = "\uD83C\uDFA5", PIN = "\uD83D\uDCCD", HOST = "\uD83C\uDFE0", CHECK = "\u2705";
 
 module.exports = function setupMatches(ctx) {
-  const { client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results, syncRoles } = ctx;
+  const { client, sessions, CFG, ENV, WORKER, norm, mainGuild, findMember, results, syncRoles, mods } = ctx;
+
+  // Moderator override on bans/submissions: the Manage Server permission, or
+  // moderator status granted with /mod add (mods.js; includes config owners).
+  const isMod = (i) => !!((i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild)) || (mods && mods.isModerator(i.user.id)));
 
   let store = { threads: {}, channels: {} };
   try { store = JSON.parse(fs.readFileSync(STORE, "utf8")); } catch { /* fresh */ }
@@ -237,9 +241,8 @@ module.exports = function setupMatches(ctx) {
     if (entry.decidedMap) { await i.reply({ content: `The map is already decided: **${entry.decidedMap}**.`, ephemeral: true }); return; }
 
     const turn = entry.order[entry.bans.length];
-    const isMod = i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild);
     const myTeam = teamOfUser(entry, i.user.username);
-    if (myTeam !== turn && !isMod) {
+    if (myTeam !== turn && !isMod(i)) {
       await i.reply({ content: myTeam ? `It is **${turn}**'s turn to ban.` : "Only players in this match can ban maps.", ephemeral: true });
       return;
     }
@@ -265,8 +268,7 @@ module.exports = function setupMatches(ctx) {
     const k = i.customId.split(":").slice(1).join(":");
     const entry = store.threads[k];
     if (!entry) { await i.reply({ content: "This match is no longer tracked (bot restarted). Use /result instead.", ephemeral: true }); return; }
-    const isMod = i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild);
-    if (!teamOfUser(entry, i.user.username) && !isMod) {
+    if (!teamOfUser(entry, i.user.username) && !isMod(i)) {
       await i.reply({ content: "Only players in this match can submit its result.", ephemeral: true });
       return;
     }
@@ -350,7 +352,7 @@ module.exports = function setupMatches(ctx) {
     await i.deferReply({ ephemeral: true });
     const k = byThread.get(i.channelId);
     const entry = k ? store.threads[k] : null;
-    if (entry && !teamOfUser(entry, i.user.username) && !(i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
+    if (entry && !teamOfUser(entry, i.user.username) && !isMod(i)) {
       await i.editReply("Only players in this match can submit its result.");
       return;
     }
@@ -432,4 +434,3 @@ module.exports = function setupMatches(ctx) {
   console.log("matches: threads " + (CFG.matchThreads === false ? "OFF" : "ON") + ", map bans " + (bansEnabled() ? "ON" : "OFF"));
   return { onMatchReady, registerCommands, channelFor };
 };
-
