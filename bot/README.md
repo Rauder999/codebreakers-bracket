@@ -89,6 +89,21 @@ it) and runs the setup there:
   the code in the thread. Streamed match (`onStream`/`liveNow` in the admin app):
   nobody creates a lobby, everyone waits for the observer's code.
 - State lives in `matches.json`, so threads and ban progress survive restarts.
+- **Exactly one ping per player (2026-08-12).** Players are pulled into the
+  thread *silently* (send a blank message, edit mentions in, delete it — the
+  only no-notification path Discord offers; `thread.members.add()` pings
+  "you were added" per player). The channel announcement is the single ping.
+- **Mid-tournament roster fixes (2026-08-12).** Bans/submissions check rosters
+  from the **live bracket state**, not the snapshot taken at thread creation.
+  If the admin corrects a team's discords in the app, `onStateUpdate` refreshes
+  every open thread of that session and quietly adds the new players — no
+  restart, no re-pings, the tournament continues from where it stood. The
+  bracket state in the worker is authoritative; the bot only derives from it,
+  so an admin can also un-stick a match by setting placements manually in the
+  admin app and propagation/pings resume automatically.
+- **Button custom-id gotcha:** match keys are `CODE:podId` — they contain a
+  colon. Never parse `customId.split(":")[1]`; take everything between the
+  prefix and (for map buttons) the trailing index.
 
 > **The in-bracket match chat was removed** from `live.html` on the same date —
 > nobody used it. Discord threads are now the only player-facing channel.
