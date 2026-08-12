@@ -231,7 +231,7 @@ module.exports = function setupMatches(ctx) {
 
   // ---- interactions --------------------------------------------------------
   async function onBanClick(i) {
-    const [, k, idxStr] = i.customId.split(":");
+    const partsCb = i.customId.split(":"); const idxStr = partsCb.pop(); const k = partsCb.slice(1).join(":");
     const entry = store.threads[k];
     if (!entry) { await i.reply({ content: "This ban phase is no longer tracked (bot restarted).", ephemeral: true }); return; }
     if (entry.decidedMap) { await i.reply({ content: `The map is already decided: **${entry.decidedMap}**.`, ephemeral: true }); return; }
@@ -262,7 +262,7 @@ module.exports = function setupMatches(ctx) {
   }
 
   async function onSubmitClick(i) {
-    const k = i.customId.split(":")[1];
+    const k = i.customId.split(":").slice(1).join(":");
     const entry = store.threads[k];
     if (!entry) { await i.reply({ content: "This match is no longer tracked (bot restarted). Use /result instead.", ephemeral: true }); return; }
     const isMod = i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild);
@@ -432,3 +432,4 @@ module.exports = function setupMatches(ctx) {
   console.log("matches: threads " + (CFG.matchThreads === false ? "OFF" : "ON") + ", map bans " + (bansEnabled() ? "ON" : "OFF"));
   return { onMatchReady, registerCommands, channelFor };
 };
+
