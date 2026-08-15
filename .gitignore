@@ -7,3 +7,11 @@ dist/
 # Logs / misc
 *.log
 .DS_Store
+
+# cb-bot runtime state and secrets (live on the VM, never in git)
+bot/.env
+bot/data/
+bot/matches.json
+bot/state.json
+bot/*.bak*
+bot/*.playr-*

@@ -1,0 +1,22 @@
+{
+  "name": "cb-bot",
+  "version": "1.1.0",
+  "description": "CodeBreakers tournament Discord bot + stats service",
+  "main": "index.js",
+  "scripts": {
+    "bot": "node index.js",
+    "web": "node web/server.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.js && node --check results.js && node --check matches.js && node --check mods.js && node --check stats/db.js && node --check stats/vision.js && node --check stats/rosters.js && node --check stats/ingest.js && node --check web/server.js && node --check web/auth.js && node --check web/queries.js",
+    "ascii": "perl tools/ascii-guard.pl --check"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.27.0",
+    "ws": "^8.21.1"
+  }
+}

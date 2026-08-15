@@ -1,0 +1,51 @@
+{
+  "_source": "aon-finals/samples/cashout-01.png, transcribed by hand as ground truth.",
+  "_note": "Squads are deliberately in ON-SCREEN order, not placement order: THE BIG SPLASH is pinned at the top above the VS divider but placed 2nd. Any change that makes the pipeline trust vertical order will fail the tests.",
+  "screen_type": "cashout_results",
+  "confidence": "high",
+  "map_name": "Skyway Stadium",
+  "in_progress": false,
+  "notes": "",
+  "squads": [
+    {
+      "placement": 2,
+      "squad_label": "THE BIG SPLASH",
+      "cash": "$39,500",
+      "players": [
+        { "name": "SHADOW#7360", "class": "M", "eliminations": "3", "assists": "6", "deaths": "7", "revives": "2", "combat": "3,270", "support": "430", "objective": "2,450" },
+        { "name": "NOUZEN#2675", "class": "M", "eliminations": "9", "assists": "2", "deaths": "5", "revives": "1", "combat": "4,919", "support": "564", "objective": "3,700" },
+        { "name": "TEAALJ#0441", "class": "M", "eliminations": "3", "assists": "8", "deaths": "6", "revives": "2", "combat": "3,993", "support": "480", "objective": "2,450" }
+      ]
+    },
+    {
+      "placement": 1,
+      "squad_label": "THE LIVE WIRES",
+      "cash": "$40,000",
+      "players": [
+        { "name": "CRIMSON#6337", "class": "M", "eliminations": "5", "assists": "3", "deaths": "4", "revives": "3", "combat": "4,375", "support": "1,191", "objective": "2,000" },
+        { "name": "COLGATE#0052", "class": "M", "eliminations": "7", "assists": "5", "deaths": "4", "revives": "0", "combat": "5,880", "support": "160", "objective": "3,250" },
+        { "name": "JOEWOAHSEPH#8833", "class": "H", "eliminations": "7", "assists": "6", "deaths": "5", "revives": "2", "combat": "4,981", "support": "544", "objective": "2,250" }
+      ]
+    },
+    {
+      "placement": 3,
+      "squad_label": "THE BOUNDLESS",
+      "cash": "$32,000",
+      "players": [
+        { "name": "AYELEKZ#8224", "class": "M", "eliminations": "2", "assists": "7", "deaths": "6", "revives": "0", "combat": "3,513", "support": "192", "objective": "3,200" },
+        { "name": "LUCKY#1444", "class": "M", "eliminations": "2", "assists": "2", "deaths": "4", "revives": "1", "combat": "2,182", "support": "510", "objective": "2,700" },
+        { "name": "HONOURFUL#7117", "class": "H", "eliminations": "10", "assists": "2", "deaths": "4", "revives": "1", "combat": "5,726", "support": "556", "objective": "2,700" }
+      ]
+    },
+    {
+      "placement": 4,
+      "squad_label": "THE KINGFISH",
+      "cash": "$25,000",
+      "players": [
+        { "name": "AGENT_PENGUIN999#2110", "class": "H", "eliminations": "6", "assists": "4", "deaths": "5", "revives": "1", "combat": "4,876", "support": "462", "objective": "2,450" },
+        { "name": "TSUNAMI4CHAN#5005", "class": "H", "eliminations": "7", "assists": "3", "deaths": "7", "revives": "1", "combat": "5,516", "support": "829", "objective": "1,950" },
+        { "name": "CHICKENPOX#0211", "class": "H", "eliminations": "1", "assists": "3", "deaths": "7", "revives": "1", "combat": "1,260", "support": "304", "objective": "2,200" }
+      ]
+    }
+  ]
+}

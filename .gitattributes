@@ -1,0 +1,2 @@
+# The bot tree is deployed to a Linux VM - keep LF regardless of checkout OS.
+bot/** text eol=lf
