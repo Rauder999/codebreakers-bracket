@@ -1,4 +1,4 @@
-﻿{
+{
   "workerUrl": "https://codebreakers-api.codebreakerstf.workers.dev",
   "announceChannelId": "1531414566355996722",
   "pollIntervalSec": 60,

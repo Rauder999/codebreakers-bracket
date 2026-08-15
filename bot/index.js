@@ -12,7 +12,10 @@ const path = require("path");
 const WebSocket = require("ws");
 const { Client, GatewayIntentBits } = require("discord.js");
 
-const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
+// The leading .replace strips a UTF-8 BOM. An editor on Windows can add one
+// invisibly, and JSON.parse then throws on the very first character -- which,
+// at this point in startup, means the bot simply never comes up.
+const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8").replace(/^\uFEFF/, ""));
 const envText = fs.existsSync(path.join(__dirname, ".env")) ? fs.readFileSync(path.join(__dirname, ".env"), "utf8") : "";
 const ENV = Object.fromEntries(envText.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
   .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]));
