@@ -4,6 +4,55 @@
 > to get full context on the CodeBreakers tournament automation. Written 2026-07-27.
 > Maintainers: Rauder (owner) + Playr (VM host). Everything below is live in production.
 
+## 0. TOURNAMENT-DAY RUNBOOK (for Playr — running a tournament solo)
+
+You already have: VM root (ssh + sudo), bot owner status (`stats.adminDiscordIds`
+in config.json — makes you a moderator for every gate: `/tournament`, `/mod`,
+result Reject, dispute pings), and stats-site admin. The one thing you need on
+top is an **admin-panel account**: open the admin app
+(`https://rauder999.github.io/codebreakers-bracket/`) → **Sign in / Register** →
+register with the invite code Rauder gives you. Your account can create
+sessions, import registrations, start/archive/delete tournaments it owns.
+
+**One-time server setup (first tournament on the CODE server):**
+1. Invite the bot (needs Manage Server on that Discord):
+   `https://discord.com/oauth2/authorize?client_id=1529573475650371919&scope=bot&permissions=361045773376`
+2. Pin the guild: add `"guildId": "<CODE server id>"` to `/opt/cb-bot/config.json`
+   (right-click the server icon → Copy Server ID), then
+   `sudo systemctl restart cb-bot`. Check `sudo journalctl -u cb-bot -n 20` for
+   `matches: /result and /tournament registered in <server>`.
+3. If the bot is still on the test server too, kick it there (or leave guildId
+   to disambiguate — guildId is the authority).
+
+**Per tournament:**
+1. Create the tournament channel in Discord as usual.
+2. Admin app: sign in → **Import from Notion** (pulls approved registrations,
+   seeds by summed rank) → pick size (2/4/8/16/32) → **Generate** → the session
+   goes live with a `CB-XXXX` code (top bar).
+3. In the tournament channel run `/tournament bind code:CB-XXXX` — all pings
+   and match threads go there. `/tournament roles` hands out the tournament role.
+4. Sanity-check the live page (Live Link button), then press **Start
+   Tournament**. Until that button the bot is completely silent.
+5. From here it runs itself: pings + private threads + map bans + result
+   screenshots + confirmations + next-round pings.
+
+**If something goes wrong mid-tournament:**
+- Wrong/missing discords: fix them in the admin app Setup panel — the bot picks
+  the change up live, quietly adds the right people to the existing thread.
+  Nothing needs restarting.
+- A match is stuck (bot missed something): set the placements manually in the
+  admin app — propagation and next-round pings resume automatically.
+- Bot misbehaving: `sudo journalctl -u cb-bot -f` to watch,
+  `sudo systemctl restart cb-bot` is always safe — announced matches, threads,
+  bans and scheduled thread-closes are persisted and survive restarts.
+- A result is wrong after auto-apply: press **Dispute** on the result message
+  (pings all moderators), then fix placements in the admin app.
+- `/tournament status` shows watched sessions, start state, bound channels.
+
+**After:** admin app → **Archive** (freezes it into the public gallery), then
+**Delete** (removes the live session). Player stats live in the stats DB on the
+VM and are not touched by either.
+
 ## 1. The big picture
 
 CodeBreakers runs THE FINALS community tournaments. The stack has three parts:
