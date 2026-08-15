@@ -149,11 +149,20 @@ function searchPlayers(q, limit = 50) {
     .map((r) => ({ ...r, teams: r.teams ? r.teams.split(",") : [] }));
 }
 
+// Matches on the team name OR on a roster member's Embark ID. "Which team was
+// SHADOW on?" is the more common question than the team's exact name, and team
+// names change between tournaments while the players mostly do not.
 const searchTeamsStmt = db.prepare(`
   SELECT t.id, t.name, t.tournament_code,
-         (SELECT COUNT(*) FROM match_teams mt WHERE mt.team_id = t.id) AS matches
+         (SELECT COUNT(*) FROM match_teams mt WHERE mt.team_id = t.id) AS matches,
+         (SELECT GROUP_CONCAT(p.embark_id, ', ')
+            FROM team_members tm JOIN players p ON p.id = tm.player_id
+           WHERE tm.team_id = t.id) AS roster
     FROM teams t
-   WHERE LOWER(t.name) LIKE @q
+   WHERE (LOWER(t.name) LIKE @q
+          OR EXISTS (SELECT 1
+                       FROM team_members tm JOIN players p ON p.id = tm.player_id
+                      WHERE tm.team_id = t.id AND LOWER(p.embark_id) LIKE @q))
      AND (@tournament IS NULL OR t.tournament_code = @tournament)
    ORDER BY matches DESC, t.name ASC
    LIMIT @limit
@@ -211,12 +220,28 @@ const teamRosterStmt = db.prepare(`
    WHERE tm.team_id = ?
    ORDER BY p.embark_id
 `);
+// One row per match this team played, with the squad's stat line for that
+// match summed from its players. The LEFT JOIN keeps a match that was recorded
+// with a placement but no readable player rows, rather than dropping it from
+// the team's history.
 const teamMatchesStmt = db.prepare(`
-  SELECT m.id AS match_id, m.pod_id, m.label, m.played_at,
+  SELECT m.id AS match_id, m.pod_id, m.label, m.played_at, m.tournament_code,
          COALESCE(m.map_observed, m.map_scheduled) AS map,
-         mt.placement, mt.cash
-    FROM match_teams mt JOIN matches m ON m.id = mt.match_id
+         mt.placement, mt.cash,
+         COUNT(mp.id)                      AS players,
+         SUM(mp.eliminations)              AS eliminations,
+         SUM(mp.assists)                   AS assists,
+         SUM(mp.deaths)                    AS deaths,
+         SUM(mp.revives)                   AS revives,
+         SUM(mp.combat)                    AS combat,
+         SUM(mp.support)                   AS support,
+         SUM(mp.objective)                 AS objective,
+         SUM(COALESCE(mp.disconnected, 0)) AS disconnected
+    FROM match_teams mt
+    JOIN matches m ON m.id = mt.match_id
+    LEFT JOIN match_players mp ON mp.match_team_id = mt.id
    WHERE mt.team_id = ?
+   GROUP BY mt.id
    ORDER BY m.played_at DESC
 `);
 
@@ -228,7 +253,13 @@ function teamProfile(id) {
     roster: teamRosterStmt.all(Number(id)),
     totals: buildAggregate("team", { team_id: id }, { limit: 1 })[0] || null,
     players: buildAggregate("player", { team_id: id }, { sort: "matches", limit: 50 }),
-    matches: teamMatchesStmt.all(Number(id)),
+    // K/D is derived here rather than stored, same rule as everywhere else: a
+    // moderator correcting one elimination has to move the ratio with it.
+    matches: teamMatchesStmt.all(Number(id)).map((r) => ({
+      ...r,
+      kd: r.eliminations == null ? null
+        : Number((r.deaths > 0 ? r.eliminations / r.deaths : r.eliminations).toFixed(2)),
+    })),
   };
 }
 

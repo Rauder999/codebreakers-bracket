@@ -329,23 +329,49 @@ async function viewPlayer(id) {
       ], { emptyText: "No matches recorded." })));
 }
 
-async function viewTeams() {
+async function viewTeams(query = "") {
   setBusy();
-  const data = await api(`/api/teams?${qs({ sort: "matches", limit: 200 })}`);
+  // Searching hits the teams table directly, so a team that has registered but
+  // not yet played still turns up. The aggregate view only knows teams with
+  // recorded matches.
+  const path = query ? `/api/teams?q=${encodeURIComponent(query)}` : `/api/teams?${qs({ sort: "matches", limit: 200 })}`;
+  const data = await api(path);
+
+  const search = el("div", { class: "filters" },
+    el("div", { class: "field", style: "flex:1" },
+      el("label", { for: "tsearch" }, "Search teams"),
+      el("input", {
+        id: "tsearch", type: "search", value: query,
+        placeholder: "Team name, or a player on it\u2026",
+        oninput: debounce((e) => { location.hash = e.target.value ? `#/teams?q=${encodeURIComponent(e.target.value)}` : "#/teams"; }, 300),
+      })));
+
+  const columns = query
+    ? [
+      { key: "name", label: "Team", left: true, fmt: (r) => el("a", { href: `#/teams/${r.id}` }, r.name) },
+      { key: "tournament_code", label: "Tournament", left: true, fmt: (r) => r.tournament_code || "\u2013" },
+      { key: "roster", label: "Roster", left: true, fmt: (r) => r.roster || el("span", { class: "muted" }, "not registered") },
+      { key: "matches", label: "Matches" },
+    ]
+    : [
+      { key: "label", label: "Team", left: true, fmt: (r) => el("a", { href: `#/teams/${r.key}` }, r.label) },
+      { key: "matches", label: "Matches", bar: true },
+      { key: "wins", label: "Wins" },
+      { key: "win_rate", label: "Win %", fmt: (r) => num(r.win_rate, 1) },
+      { key: "avg_placement", label: "Avg place", fmt: (r) => num(r.avg_placement, 2) },
+      { key: "kd", label: "K/D", fmt: (r) => num(r.kd, 2) },
+      { key: "eliminations", label: "Elims" },
+      { key: "combat", label: "Combat" }, { key: "support", label: "Support" }, { key: "objective", label: "Objective" },
+    ];
+
   main.replaceChildren(
-    filterBar(render, { showClass: false }),
+    query ? search : el("div", {}, search, filterBar(render, { showClass: false })),
     el("div", { class: "card" },
-      el("h2", {}, "Teams", el("span", { class: "sub" }, `${data.teams.length} rows`)),
-      dataTable(data.teams, [
-        { key: "label", label: "Team", left: true, fmt: (r) => el("a", { href: `#/teams/${r.key}` }, r.label) },
-        { key: "matches", label: "Matches", bar: true },
-        { key: "wins", label: "Wins" },
-        { key: "win_rate", label: "Win %", fmt: (r) => num(r.win_rate, 1) },
-        { key: "avg_placement", label: "Avg place", fmt: (r) => num(r.avg_placement, 2) },
-        { key: "kd", label: "K/D", fmt: (r) => num(r.kd, 2) },
-        { key: "eliminations", label: "Elims" },
-        { key: "combat", label: "Combat" }, { key: "support", label: "Support" }, { key: "objective", label: "Objective" },
-      ], { emptyText: "No team stats recorded yet." })));
+      el("h2", {}, query ? `Search: "${query}"` : "Teams",
+        el("span", { class: "sub" }, `${data.teams.length} ${query ? "found" : "rows"}`)),
+      dataTable(data.teams, columns, {
+        emptyText: query ? "No team name or roster matches that search." : "No team stats recorded yet.",
+      })));
 }
 
 async function viewTeam(id) {
@@ -364,13 +390,23 @@ async function viewTeam(id) {
         { key: "label", label: "Player", left: true, fmt: (r) => el("a", { href: `#/players/${r.key}` }, r.label) },
         ...SPLIT_COLUMNS.slice(1),
       ], { emptyText: "No player stats for this team yet." })),
-    el("div", { class: "card" }, el("h2", {}, "Matches"),
+    // The squad's stat line per match, summed from whoever played it. Same
+    // columns as a player's match log so the two read the same way.
+    el("div", { class: "card" }, el("h2", {}, "Match log",
+      el("span", { class: "sub" }, "squad totals per match")),
       dataTable(d.matches, [
         { key: "played_at", label: "When", left: true, fmt: (r) => el("a", { href: `#/matches/${r.match_id}` }, when(r.played_at)) },
         { key: "label", label: "Match", left: true, fmt: (r) => r.label || r.pod_id },
         { key: "map", label: "Map", left: true, fmt: (r) => r.map || "\u2013" },
         { key: "placement", label: "Place", fmt: (r) => placeBadge(r.placement) },
+        { key: "kd", label: "K/D", fmt: (r) => num(r.kd, 2) },
+        { key: "eliminations", label: "E" }, { key: "assists", label: "A" },
+        { key: "deaths", label: "D" }, { key: "revives", label: "R" },
+        { key: "combat", label: "Combat" }, { key: "support", label: "Support" }, { key: "objective", label: "Objective" },
         { key: "cash", label: "Cash", fmt: (r) => money(r.cash) },
+        // A disconnect explains a thin stat line, so surface it rather than
+        // leaving the row looking like a bad game.
+        { key: "disconnected", label: "", fmt: (r) => (r.disconnected ? el("span", { class: "pill ghost" }, `${r.disconnected} DC`) : "") },
       ], { emptyText: "No matches recorded." })));
 }
 
@@ -585,7 +621,7 @@ async function render() {
     if (view === "players" && parts[1]) return await viewPlayer(parts[1]);
     if (view === "players") return await viewPlayers(query.get("q") || "");
     if (view === "teams" && parts[1]) return await viewTeam(parts[1]);
-    if (view === "teams") return await viewTeams();
+    if (view === "teams") return await viewTeams(query.get("q") || "");
     if (view === "matches" && parts[1]) return await viewMatch(parts[1]);
     if (view === "matches") return await viewMatches();
     if (view === "users") return await viewUsers();
