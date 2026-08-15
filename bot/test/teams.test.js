@@ -124,6 +124,61 @@ test("K/D on a match row is derived from that match's sums", () => {
   assert.strictEqual(row.kd, Number(expected.toFixed(2)));
 });
 
+// --- match counting ---------------------------------------------------------
+// v_player_match has one row per player per match. Counting those rows as
+// "matches" made a team's totals read 3x high for a 3-player squad: one match
+// showed as "3 matches, 3 won". These pin the count to match identity.
+
+test("a team that has played one match reports one match, not one per player", () => {
+  const team = findTeam("Big Splash");
+  const totals = Q.buildAggregate("team", { team_id: team.id }, { limit: 1 })[0];
+  assert.strictEqual(totals.matches, 1, "3 players in 1 match is still 1 match");
+});
+
+test("the totals tile and the match log cannot disagree about match count", () => {
+  // The invariant the bug broke: the number on the team page has to be the
+  // number of rows underneath it.
+  for (const name of ["Big Splash", "Live Wires", "Boundless", "Kingfish"]) {
+    const team = findTeam(name);
+    const profile = Q.teamProfile(team.id);
+    assert.strictEqual(profile.totals.matches, profile.matches.length,
+      `${name}: totals say ${profile.totals.matches} matches, log has ${profile.matches.length}`);
+  }
+});
+
+test("wins are counted per match, not per player on the winning squad", () => {
+  const winner = findTeam("Live Wires");   // placed 1st in the fixture
+  const wt = Q.buildAggregate("team", { team_id: winner.id }, { limit: 1 })[0];
+  assert.strictEqual(wt.wins, 1, "one won match, not one per player");
+  assert.strictEqual(wt.win_rate, 100);
+
+  const loser = findTeam("Big Splash");    // placed 2nd
+  const lt = Q.buildAggregate("team", { team_id: loser.id }, { limit: 1 })[0];
+  assert.strictEqual(lt.wins, 0);
+  assert.strictEqual(lt.win_rate, 0);
+});
+
+test("per-match averages divide by matches, not by player rows", () => {
+  const team = findTeam("Big Splash");
+  const totals = Q.buildAggregate("team", { team_id: team.id }, { limit: 1 })[0];
+  const row = Q.teamProfile(team.id).matches[0];
+
+  // One match played, so the squad's per-match figures are that match's totals.
+  assert.strictEqual(totals.elims_per_match, row.eliminations);
+  assert.strictEqual(totals.combat_per_match, row.combat);
+  assert.strictEqual(totals.objective_per_match, row.objective);
+});
+
+test("counting by match identity leaves the player dimension alone", () => {
+  // A player has exactly one row per match, so this was always right and must
+  // stay right.
+  const rows = Q.buildAggregate("player", {}, { limit: 50 });
+  assert.ok(rows.length >= 12, "all twelve players should aggregate");
+  for (const r of rows) {
+    assert.strictEqual(r.matches, 1, `${r.label} played one match`);
+  }
+});
+
 test("every team in the pod gets its own distinct match row", () => {
   const seen = new Map();
   for (const name of ["Big Splash", "Live Wires", "Boundless", "Kingfish"]) {

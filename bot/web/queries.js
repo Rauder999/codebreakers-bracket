@@ -15,18 +15,40 @@ const { db } = require("../stats/db");
 
 // --- dimension + metric whitelists -----------------------------------------
 
+// v_player_match holds one row per PLAYER per match, so what counts as "a
+// match" depends on the grouping:
+//
+//   * player  -- a player has exactly one row per match, so rows ARE matches.
+//   * team    -- a squad has one row per player per match. Counting rows made
+//                a team that had played a single 3-player match report "3
+//                matches, 3 won", and divided every per-match average by the
+//                size of the squad. Count the match itself.
+//   * match   -- likewise: every row belongs to the same one match.
+//   * class / map / tournament -- rows are independent player appearances that
+//                happen to share a match, and "combat per match" for Heavy
+//                means per heavy player per match. Rows are the right unit;
+//                counting distinct matches here would merge separate players.
+//
+// perMatch marks the groupings where many rows are ONE participation.
+const ROWS = "COUNT(*)";
+const DISTINCT_MATCHES = "COUNT(DISTINCT vpm.match_id)";
+const countFor = (dim) => (dim.perMatch ? DISTINCT_MATCHES : ROWS);
+const winsFor = (dim) => (dim.perMatch
+  ? "COUNT(DISTINCT CASE WHEN vpm.placement = 1 THEN vpm.match_id END)"
+  : "SUM(CASE WHEN vpm.placement = 1 THEN 1 ELSE 0 END)");
+
 const DIMENSIONS = {
   player:     { select: "vpm.player_id AS key, p.embark_id AS label", join: "JOIN players p ON p.id = vpm.player_id", group: "vpm.player_id", requires: "vpm.player_id IS NOT NULL" },
-  team:       { select: "vpm.team_id AS key, t.name AS label",        join: "JOIN teams t ON t.id = vpm.team_id",      group: "vpm.team_id",   requires: "vpm.team_id IS NOT NULL" },
+  team:       { select: "vpm.team_id AS key, t.name AS label",        join: "JOIN teams t ON t.id = vpm.team_id",      group: "vpm.team_id",   requires: "vpm.team_id IS NOT NULL", perMatch: true },
   class:      { select: "vpm.class AS key, vpm.class AS label",       join: "",                                        group: "vpm.class",     requires: "vpm.class IS NOT NULL" },
   map:        { select: "vpm.map AS key, vpm.map AS label",           join: "",                                        group: "vpm.map",       requires: "vpm.map IS NOT NULL" },
   tournament: { select: "vpm.tournament_code AS key, COALESCE(tn.name, vpm.tournament_code) AS label", join: "LEFT JOIN tournaments tn ON tn.code = vpm.tournament_code", group: "vpm.tournament_code", requires: "" },
-  match:      { select: "vpm.match_id AS key, vpm.label AS label",    join: "",                                        group: "vpm.match_id",  requires: "" },
+  match:      { select: "vpm.match_id AS key, vpm.label AS label",    join: "",                                        group: "vpm.match_id",  requires: "", perMatch: true },
 };
 
 // Sums are the only thing aggregated; every rate below is derived from them.
-const SUMS = `
-  COUNT(*)                                              AS matches,
+const sumsFor = (dim) => `
+  ${countFor(dim)}                                      AS matches,
   COALESCE(SUM(vpm.eliminations), 0)                    AS eliminations,
   COALESCE(SUM(vpm.assists), 0)                         AS assists,
   COALESCE(SUM(vpm.deaths), 0)                          AS deaths,
@@ -34,23 +56,31 @@ const SUMS = `
   COALESCE(SUM(vpm.combat), 0)                          AS combat,
   COALESCE(SUM(vpm.support), 0)                         AS support,
   COALESCE(SUM(vpm.objective), 0)                       AS objective,
-  SUM(CASE WHEN vpm.placement = 1 THEN 1 ELSE 0 END)    AS wins,
+  ${winsFor(dim)}                                       AS wins,
   AVG(CAST(vpm.placement AS REAL))                      AS avg_placement
 `;
 
-// Sort keys the client may ask for, mapped to the derived expression.
-const SORTABLE = {
-  matches: "matches", eliminations: "eliminations", assists: "assists",
-  deaths: "deaths", revives: "revives", combat: "combat", support: "support",
-  objective: "objective", wins: "wins", avg_placement: "avg_placement",
-  kd: "CASE WHEN SUM(vpm.deaths) > 0 THEN CAST(SUM(vpm.eliminations) AS REAL) / SUM(vpm.deaths) ELSE CAST(SUM(vpm.eliminations) AS REAL) END",
-  elims_per_match: "CAST(SUM(vpm.eliminations) AS REAL) / COUNT(*)",
-  combat_per_match: "CAST(SUM(vpm.combat) AS REAL) / COUNT(*)",
-  support_per_match: "CAST(SUM(vpm.support) AS REAL) / COUNT(*)",
-  objective_per_match: "CAST(SUM(vpm.objective) AS REAL) / COUNT(*)",
-  revives_per_match: "CAST(SUM(vpm.revives) AS REAL) / COUNT(*)",
-  label: "label",
+// Sort keys the client may ask for, mapped to the derived expression. The
+// per-match ones divide by whatever a match means for this grouping.
+const sortableFor = (dim) => {
+  const M = countFor(dim);
+  return {
+    matches: "matches", eliminations: "eliminations", assists: "assists",
+    deaths: "deaths", revives: "revives", combat: "combat", support: "support",
+    objective: "objective", wins: "wins", avg_placement: "avg_placement",
+    kd: "CASE WHEN SUM(vpm.deaths) > 0 THEN CAST(SUM(vpm.eliminations) AS REAL) / SUM(vpm.deaths) ELSE CAST(SUM(vpm.eliminations) AS REAL) END",
+    elims_per_match: `CAST(SUM(vpm.eliminations) AS REAL) / ${M}`,
+    combat_per_match: `CAST(SUM(vpm.combat) AS REAL) / ${M}`,
+    support_per_match: `CAST(SUM(vpm.support) AS REAL) / ${M}`,
+    objective_per_match: `CAST(SUM(vpm.objective) AS REAL) / ${M}`,
+    revives_per_match: `CAST(SUM(vpm.revives) AS REAL) / ${M}`,
+    label: "label",
+  };
 };
+
+// The sort whitelist is the same set of keys for every dimension; the shape is
+// what the API validates against.
+const SORTABLE = sortableFor({});
 
 // Derive every rate from the summed row, in one place.
 function decorate(row) {
@@ -110,19 +140,20 @@ function buildAggregate(groupBy, filters = {}, opts = {}) {
     ? (whereSql ? `${whereSql} AND ${dim.requires}` : `WHERE ${dim.requires}`)
     : whereSql;
 
-  const sortExpr = SORTABLE[opts.sort] || SORTABLE.matches;
+  const sortKeys = sortableFor(dim);
+  const sortExpr = sortKeys[opts.sort] || sortKeys.matches;
   const dir = String(opts.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
   const minMatches = Number(opts.minMatches) > 0 ? Number(opts.minMatches) : 0;
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 500);
   const offset = Math.max(Number(opts.offset) || 0, 0);
 
   const sql = `
-    SELECT ${dim.select}, ${SUMS}
+    SELECT ${dim.select}, ${sumsFor(dim)}
     FROM v_player_match vpm
     ${dim.join}
     ${where}
     GROUP BY ${dim.group}
-    ${minMatches ? `HAVING COUNT(*) >= ${minMatches}` : ""}
+    ${minMatches ? `HAVING ${countFor(dim)} >= ${minMatches}` : ""}
     ORDER BY ${sortExpr} ${dir} NULLS LAST
     LIMIT ${limit} OFFSET ${offset}
   `;
