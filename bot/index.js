@@ -38,10 +38,19 @@ const norm = (s) => String(s || "").toLowerCase().trim().replace(/^@/, "").split
 // the whole team in it) - always expand before matching.
 const splitDiscords = (arr) => (arr || []).flatMap((d) => String(d).split(",")).map((d) => d.trim()).filter(Boolean);
 
+// The tournament guild. Pin it with config "guildId" - if the bot ever sits in
+// two servers at once (test + production), "first guild in cache" is a coin
+// flip and member lookups / role sync would hit the wrong one.
+// The full member fetch is cached: on a 1000+ member server refetching on
+// every announce gets gateway-rate-limited (opcode 8).
+let lastMemberFetch = 0;
 async function mainGuild() {
-  const g = client.guilds.cache.first();
+  const g = (CFG.guildId && client.guilds.cache.get(String(CFG.guildId))) || client.guilds.cache.first();
   if (!g) return null;
-  try { await g.members.fetch(); } catch (e) { console.error("members fetch failed (Server Members Intent enabled?):", e.message); }
+  if (Date.now() - lastMemberFetch > 5 * 60 * 1000) {
+    try { await g.members.fetch(); lastMemberFetch = Date.now(); }
+    catch (e) { console.error("members fetch failed (Server Members Intent enabled?):", e.message); }
+  }
   return g;
 }
 function findMember(g, discordName) {

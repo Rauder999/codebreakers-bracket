@@ -104,6 +104,24 @@ it) and runs the setup there:
 - **Button custom-id gotcha:** match keys are `CODE:podId` — they contain a
   colon. Never parse `customId.split(":")[1]`; take everything between the
   prefix and (for map buttons) the trailing index.
+- **Auto-archive (2026-08-15).** When every team in a pod has a placement, the
+  thread is archived after a grace period (`threadCloseDelayMin`, default 10)
+  with a short goodbye message, so the channel's thread list only shows the
+  matches still in play. Threads are **never deleted** — they hold the result
+  screenshot and the ban trail a dispute needs; a moderator can unarchive any
+  time. Scheduled closes persist in `matches.json` and survive restarts.
+- **Production-server hardening (2026-08-15).** `config.guildId` pins the
+  tournament guild (without it, "first guild in cache" is a coin flip when the
+  bot is in test + production at once) — set it right after inviting the bot
+  to a new server. The full member fetch is cached for 5 minutes (a 1000+
+  member guild rate-limits per-announce refetches). `/tournament` re-checks
+  moderator status inside the handler (defaultMemberPermissions only hides
+  the command; server admins can loosen it), and `bind` validates the session
+  code format. Minimal invite (no Administrator):
+  `https://discord.com/oauth2/authorize?client_id=1529573475650371919&scope=bot&permissions=361045773376`
+  (View/Send/EmbedLinks/History/AddReactions + ManageRoles + ManageThreads +
+  CreatePrivateThreads + SendMessagesInThreads). Keep the bot's role low in
+  the role hierarchy: it only ever creates/assigns `Tournament: <name>` roles.
 
 > **The in-bracket match chat was removed** from `live.html` on the same date —
 > nobody used it. Discord threads are now the only player-facing channel.

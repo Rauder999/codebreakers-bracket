@@ -246,12 +246,23 @@ module.exports = function setupMatches(ctx) {
   // Called on every state snapshot: when the admin fixes a team's discords
   // mid-tournament, refresh the stored rosters of that session's threads and
   // quietly pull newly added players into their thread. Nothing is re-pinged.
+  // Also schedules finished matches' threads for auto-archive.
   async function onStateUpdate(code, s) {
     if (!s || !Array.isArray(s.pods)) return;
     for (const entry of Object.values(store.threads)) {
       if (entry.code !== code) continue;
       const pod = s.pods.find((p) => p.id === entry.podId);
       if (!pod) continue;
+
+      // Match finished (every slot placed): archive the thread after a grace
+      // period so only the active matches stay in the channel's thread list.
+      const finished = pod.teams.length >= 2 && pod.teams.every((t) => t.name && t.placement);
+      if (finished && !entry.closed && !entry.closeAt) {
+        const min = Number(CFG.threadCloseDelayMin);
+        entry.closeAt = Date.now() + (isFinite(min) && min >= 0 ? min : 10) * 60 * 1000;
+        save();
+      }
+
       const fresh = rostersOf(s, pod);
       if (JSON.stringify(fresh) === JSON.stringify(entry.rosters)) continue;
       const known = new Set(Object.values(entry.rosters || {}).flat());
@@ -266,6 +277,27 @@ module.exports = function setupMatches(ctx) {
       } catch (e) { console.error("matches: roster sync failed:", e.message); }
     }
   }
+
+  // Archive sweep: runs on a timer so scheduled closes survive restarts
+  // (closeAt is persisted). Archiving hides the thread from the channel's
+  // active list - history stays browsable, and a moderator can always
+  // unarchive. We deliberately never DELETE threads: they hold the result
+  // screenshots and the ban trail, which is exactly what a dispute needs.
+  async function sweepFinishedThreads() {
+    const now = Date.now();
+    for (const entry of Object.values(store.threads)) {
+      if (entry.closed || !entry.closeAt || entry.closeAt > now) continue;
+      entry.closed = true;
+      save();
+      try {
+        const thread = await client.channels.fetch(entry.threadId);
+        await thread.send({ content: "Result recorded. Archiving this setup thread - see the announcements channel for your next match. GLHF!" });
+        await thread.setArchived(true, "match finished");
+        console.log(`matches: archived finished thread ${entry.key}`);
+      } catch (e) { console.error(`matches: archive failed for ${entry.key}:`, e.message); }
+    }
+  }
+  setInterval(() => { sweepFinishedThreads().catch((e) => console.error("matches sweep:", e.message)); }, 60 * 1000);
 
   async function finalizeMap(entry, thread) {
     const banned = new Set(entry.bans.map((b) => b.map));
@@ -350,12 +382,22 @@ module.exports = function setupMatches(ctx) {
     await respond("Screenshot read. The proposed result is posted here and is waiting for a moderator to confirm.");
   }
 
-  // /tournament - host-side setup, hidden from non-moderators.
+  // /tournament - host-side setup. defaultMemberPermissions only hides the
+  // command from players' pickers; a server admin can loosen that in the
+  // integration settings, so the hard gate lives here.
   async function onTournamentCmd(i) {
+    if (!isMod(i)) {
+      await i.reply({ content: "Tournament setup is for moderators only.", ephemeral: true });
+      return;
+    }
     const sub = i.options.getSubcommand();
 
     if (sub === "bind") {
-      const code = i.options.getString("code").toUpperCase();
+      const code = i.options.getString("code").toUpperCase().trim();
+      if (!/^CB-[A-Z0-9]{1,12}$/.test(code)) {
+        await i.reply({ content: "That does not look like a session code (expected CB-XXXX).", ephemeral: true });
+        return;
+      }
       store.channels[code] = i.channelId;
       save();
       await i.reply({ content: `Bound tournament **${code}** to this channel. Match announcements and private threads will be created here.`, ephemeral: true });

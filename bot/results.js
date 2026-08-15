@@ -5,7 +5,8 @@
 //   3. Claude vision transcribes every squad and every player row; we
 //      reconcile those against the registered rosters (stats/rosters.js).
 //   4. A proposal embed with Apply/Reject buttons goes to the channel;
-//      a moderator (Manage Server) clicks Apply -> worker applies placements,
+//      a moderator (Manage Server or /mod add, see mods.js) clicks Apply ->
+//      worker applies placements,
 //      the bracket propagates, the match-ready pinger announces the next
 //      match, and the full per-player stat line is committed to the stats DB.
 // Anti-abuse: author must be a participant of the match, image sha256 dedupe,
@@ -38,7 +39,7 @@ const DISABLED = {
 };
 
 module.exports = function setupResults(ctx) {
-  const { client, sessions, CFG, ENV, WORKER, norm } = ctx;
+  const { client, sessions, CFG, ENV, WORKER, norm, mods } = ctx;
   if (!ENV.ANTHROPIC_API_KEY) { console.log("results: ANTHROPIC_API_KEY missing \u2014 screenshot recognition disabled"); return DISABLED; }
   if (!ENV.BOT_SECRET) { console.log("results: BOT_SECRET missing \u2014 screenshot recognition disabled"); return DISABLED; }
 
@@ -249,7 +250,10 @@ module.exports = function setupResults(ctx) {
     return true;
   }
 
-  const adminIds = () => CFG.adminDiscordIds || (CFG.stats && CFG.stats.adminDiscordIds) || [];
+  // Who gets pinged on a dispute: the owners plus everyone granted /mod add.
+  const adminIds = () => (mods && mods.moderatorIds)
+    ? mods.moderatorIds()
+    : (CFG.adminDiscordIds || (CFG.stats && CFG.stats.adminDiscordIds) || []);
 
   async function onDispute(i) {
     const info = applied.get(i.message.id);
@@ -273,7 +277,10 @@ module.exports = function setupResults(ctx) {
     if (i.customId === "cbres:dispute") { await onDispute(i); return; }
     const entry = pending.get(i.message.id);
     if (!entry) { await i.reply({ content: "This proposal has expired (bot restarted). Ask for a re-submit.", ephemeral: true }); return; }
-    const isAdmin = i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild);
+    // Admin = Manage Server permission, or moderator status granted with
+    // /mod add (mods.js; includes the config owners). mods is null only if
+    // that module failed to load, in which case the permission still works.
+    const isAdmin = (i.member && i.member.permissions.has(PermissionFlagsBits.ManageGuild)) || !!(mods && mods.isModerator(i.user.id));
     const uname = norm(i.user.username);
     const myTeam = (entry.confirmableTeams || []).find((t) => entry.teamRosters[t].includes(uname)) || null;
 
