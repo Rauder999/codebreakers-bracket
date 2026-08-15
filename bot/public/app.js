@@ -496,6 +496,70 @@ function enableEditing(card) {
 
 // --- routing ---------------------------------------------------------------
 
+// --- users (owners only) ---------------------------------------------------
+
+/**
+ * Moderators can correct match stats; owners decide who is a moderator.
+ *
+ * Both roles are re-resolved from config + the moderators table on every
+ * request (web/auth.js), so a grant or a revoke lands on that person's next
+ * click -- they never have to sign out and back in. `notice` carries a
+ * confirmation line across the reload that follows a change.
+ */
+async function viewUsers(notice) {
+  if (!ME || !ME.is_owner) return showError(new Error("Only owners can manage moderators."));
+  setBusy();
+  const { owners, moderators } = await api("/api/users");
+
+  const idInput = el("input", { type: "text", placeholder: "Discord user id", inputmode: "numeric" });
+  const nameInput = el("input", { type: "text", placeholder: "Name (optional)" });
+  const msg = el("div", { class: "note" }, notice || "");
+  const fail = (e) => msg.replaceChildren(el("span", { class: "error" }, e.message));
+
+  const grant = async () => {
+    try {
+      const id = idInput.value.trim();
+      await api("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discord_id: id, username: nameInput.value.trim() || null }),
+      });
+      viewUsers(`Granted the moderator role to ${nameInput.value.trim() || id}.`);
+    } catch (e) { fail(e); }
+  };
+
+  const revoke = async (r) => {
+    const who = r.username || r.discord_id;
+    if (!window.confirm(`Remove the moderator role from ${who}?`)) return;
+    try {
+      await api(`/api/users/${r.discord_id}`, { method: "DELETE" });
+      viewUsers(`Removed the moderator role from ${who}.`);
+    } catch (e) { fail(e); }
+  };
+
+  main.replaceChildren(
+    el("div", { class: "card" },
+      el("h2", {}, "Owners", el("span", { class: "sub" }, "set in config.json on the VM, not from here")),
+      el("div", { class: "note" }, owners.map((id) => el("span", { class: "pill good" },
+        id === ME.discord_id ? `${ME.global_name || ME.username} (you)` : id)))),
+
+    el("div", { class: "card" },
+      el("h2", {}, "Moderators", el("span", { class: "sub" }, "can correct match stats and confirm results")),
+      msg,
+      el("div", { class: "field" }, idInput, nameInput,
+        el("button", { class: "btn primary", onclick: grant }, "Grant mod")),
+      el("div", { class: "note muted" },
+        "Discord ids only: usernames can be changed, and the role would follow the handle rather than the person. ",
+        "Turn on Developer Mode in Discord, then right-click someone and Copy User ID."),
+      dataTable(moderators, [
+        { key: "username", label: "Moderator", left: true, fmt: (r) => r.username || el("span", { class: "muted" }, "unknown until first sign-in") },
+        { key: "discord_id", label: "Discord id", left: true, fmt: (r) => r.discord_id },
+        { key: "added_by", label: "Added by", left: true, fmt: (r) => r.added_by || "\u2013" },
+        { key: "added_at", label: "Added", left: true, fmt: (r) => when(r.added_at) },
+        { key: "_remove", label: "", fmt: (r) => el("button", { class: "btn", onclick: () => revoke(r) }, "Remove") },
+      ], { rowId: (r) => r.discord_id, emptyText: "No moderators yet. The owners above are the only people who can edit stats." })));
+}
+
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -524,6 +588,7 @@ async function render() {
     if (view === "teams") return await viewTeams();
     if (view === "matches" && parts[1]) return await viewMatch(parts[1]);
     if (view === "matches") return await viewMatches();
+    if (view === "users") return await viewUsers();
     return await viewLeaderboard();
   } catch (e) {
     if (e.status === 401) return gate();
@@ -554,12 +619,15 @@ async function boot() {
   if (!ME) return gate();
 
   $("#nav").hidden = false;
+  // Granting the mod role is an owner power, so the tab only exists for them.
+  // The server enforces this too -- hiding a button is not access control.
+  if (ME.is_owner) $("#nav-users").hidden = false;
   // replaceChildren is the native DOM method, not el(): it stringifies a null
   // into the text "null" instead of skipping it. Filter before passing.
   $("#who").replaceChildren(...[
     ME.avatar ? el("img", { src: `https://cdn.discordapp.com/avatars/${ME.discord_id}/${ME.avatar}.png?size=64`, alt: "" }) : null,
     el("span", {}, ME.global_name || ME.username || "signed in"),
-    ME.is_admin ? el("span", { class: "pill good" }, "mod") : null,
+    ME.is_owner ? el("span", { class: "pill good" }, "owner") : ME.is_admin ? el("span", { class: "pill good" }, "mod") : null,
     el("button", {
       class: "btn",
       onclick: async () => { await api("/auth/logout", { method: "POST" }); location.reload(); },

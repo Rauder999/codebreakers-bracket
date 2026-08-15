@@ -357,9 +357,9 @@ function upsertTeamMember(teamId, playerId, discordUsername, isSub) {
 }
 
 // --- moderators -------------------------------------------------------------
-// Managed from Discord by the owners (mods.js). Kept in this file because the
-// bot and cb-stats-web already share it: a grant is visible to the site on the
-// moderator's next request, with no restart on either side.
+// Managed by the owners on the Users page of cb-stats-web. Kept in this file
+// because the bot and the site already share it: a grant is visible to both on
+// the moderator's next request, with no restart on either side.
 
 function addModerator({ discord_id, username, added_by }) {
   stmts.addModerator.run({

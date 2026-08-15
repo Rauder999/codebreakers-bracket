@@ -17,7 +17,9 @@ const path = require("path");
 const http = require("http");
 const url = require("url");
 
-const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8"));
+// See index.js: strip a UTF-8 BOM before parsing, or a stray one takes the
+// whole service down at startup.
+const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8").replace(/^\uFEFF/, ""));
 const envPath = path.join(__dirname, "..", ".env");
 const envText = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
 const ENV = Object.fromEntries(envText.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
@@ -26,12 +28,17 @@ const ENV = Object.fromEntries(envText.split("\n").filter((l) => l.includes("=")
 const Q = require("./queries");
 const createAuth = require("./auth");
 const auth = createAuth(CFG, ENV);
+const { addModerator, removeModerator, listModerators } = require("../stats/db");
 
 const S = CFG.stats || {};
 const PORT = Number(S.port) || 8110;
 const BIND = S.bind || "0.0.0.0";
 const PUBLIC_ORIGINS = new Set(S.publicOrigins || []);
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
+// The owners, from config only. They hold the mod role permanently and are the
+// only people who may hand it out, so this list is deliberately not editable
+// over HTTP -- changing it means editing config.json on the VM.
+const OWNER_IDS = new Set((S.adminDiscordIds || []).map(String));
 
 // --- plumbing ---------------------------------------------------------------
 
@@ -223,6 +230,45 @@ async function handle(req, res) {
         return out.error ? sendJson(res, 400, { ok: false, error: out.error }) : sendJson(res, 200, { ok: true, row: out.row });
       }
 
+      // --- owner: who holds the moderator role ---
+      // Mods can correct stats; owners decide who is a mod. Both roles are
+      // re-resolved on every request (see web/auth.js), so a grant or a revoke
+      // lands on the person's next click without them signing out and back in.
+      if (pathname === "/api/users") {
+        if (!user.is_owner) return sendJson(res, 403, { ok: false, error: "only owners can manage moderators" });
+
+        if (req.method === "GET") {
+          return sendJson(res, 200, { ok: true, owners: [...OWNER_IDS], moderators: listModerators() });
+        }
+
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          const id = String(body.discord_id || "").trim();
+          // A Discord snowflake, not a username: usernames are renameable and
+          // would silently transfer the role to whoever claimed the handle next.
+          if (!/^\d{17,20}$/.test(id)) {
+            return sendJson(res, 400, { ok: false, error: "that is not a Discord user id -- turn on Developer Mode in Discord, right-click the person and Copy User ID" });
+          }
+          if (OWNER_IDS.has(id)) {
+            return sendJson(res, 400, { ok: false, error: "that account is an owner in config.json and already has the mod role" });
+          }
+          const username = body.username ? String(body.username).trim().slice(0, 64) : null;
+          addModerator({ discord_id: id, username, added_by: user.username || user.discord_id });
+          return sendJson(res, 200, { ok: true, moderators: listModerators() });
+        }
+
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }
+      m = pathname.match(/^\/api\/users\/(\d+)$/);
+      if (m && req.method === "DELETE") {
+        if (!user.is_owner) return sendJson(res, 403, { ok: false, error: "only owners can manage moderators" });
+        if (OWNER_IDS.has(m[1])) {
+          return sendJson(res, 400, { ok: false, error: "owners are set in config.json on the VM and cannot be removed here" });
+        }
+        const removed = removeModerator(m[1]);
+        return sendJson(res, 200, { ok: true, removed, moderators: listModerators() });
+      }
+
       return sendJson(res, 404, { ok: false, error: "unknown endpoint" });
     } catch (e) {
       console.error(`api ${pathname}:`, e.message);
@@ -241,8 +287,15 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, BIND, () => {
-  console.log(`cb-stats-web listening on ${BIND}:${PORT}`);
-  console.log(`  auth: ${auth.enabled ? "Discord OAuth ready" : "DISABLED (not configured)"}`);
-  console.log(`  public CORS origins: ${[...PUBLIC_ORIGINS].join(", ") || "(none)"}`);
-});
+// Only bind a port when started as a service. Required as a module (the tests)
+// it just exports the router, so the endpoint gates can be exercised without
+// racing the live instance for :8110.
+if (require.main === module) {
+  server.listen(PORT, BIND, () => {
+    console.log(`cb-stats-web listening on ${BIND}:${PORT}`);
+    console.log(`  auth: ${auth.enabled ? "Discord OAuth ready" : "DISABLED (not configured)"}`);
+    console.log(`  public CORS origins: ${[...PUBLIC_ORIGINS].join(", ") || "(none)"}`);
+  });
+}
+
+module.exports = { handle, server };
