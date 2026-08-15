@@ -70,6 +70,8 @@ const sortableFor = (dim) => {
     objective: "objective", wins: "wins", avg_placement: "avg_placement",
     kd: "CASE WHEN SUM(vpm.deaths) > 0 THEN CAST(SUM(vpm.eliminations) AS REAL) / SUM(vpm.deaths) ELSE CAST(SUM(vpm.eliminations) AS REAL) END",
     elims_per_match: `CAST(SUM(vpm.eliminations) AS REAL) / ${M}`,
+    assists_per_match: `CAST(SUM(vpm.assists) AS REAL) / ${M}`,
+    deaths_per_match: `CAST(SUM(vpm.deaths) AS REAL) / ${M}`,
     combat_per_match: `CAST(SUM(vpm.combat) AS REAL) / ${M}`,
     support_per_match: `CAST(SUM(vpm.support) AS REAL) / ${M}`,
     objective_per_match: `CAST(SUM(vpm.objective) AS REAL) / ${M}`,
@@ -448,6 +450,80 @@ const matchEdits = (matchId) => matchEditsStmt.all(Number(matchId));
 
 // --- CSV --------------------------------------------------------------------
 
+// --- tournament MVP ---------------------------------------------------------
+//
+// Combat, support and objective run in the thousands while K/D sits near 1, so
+// averaging them raw would make the score mean "combat" and nothing else. Each
+// metric is instead expressed as a percentage of the best in the field, and
+// those percentages are weighted.
+//
+// Weighting is combat-leaning by choice: fragging is 70% of the award, with
+// support and objective splitting the rest. Placement is deliberately NOT a
+// factor -- somebody knocked out in groups who averaged huge games should be
+// able to take it, which is the whole point of an MVP separate from the win.
+const MVP_WEIGHTS = {
+  combat_per_match: 0.40,
+  kd: 0.30,
+  support_per_match: 0.15,
+  objective_per_match: 0.15,
+};
+
+/**
+ * Rank already-aggregated player rows. Pure, so the weighting can be tested
+ * without a database behind it.
+ *
+ * Qualification is half the deepest run, rounded up: if the longest run was
+ * six games you need three. That scales to any bracket without configuration
+ * and stops one lucky group game topping an averages-based ranking.
+ */
+function scoreMvp(rows, { limit = 10 } = {}) {
+  if (!rows.length) return { min_matches: 0, max_matches: 0, considered: 0, qualified: 0, weights: MVP_WEIGHTS, leaders: [] };
+
+  const maxMatches = Math.max(...rows.map((r) => r.matches || 0));
+  const minMatches = Math.max(1, Math.ceil(maxMatches / 2));
+  const qualified = rows.filter((r) => (r.matches || 0) >= minMatches);
+
+  // Best in each metric among those who qualified. A non-qualifier must not
+  // set the bar, or one big game from a knocked-out player deflates everybody.
+  const best = {};
+  for (const k of Object.keys(MVP_WEIGHTS)) {
+    best[k] = qualified.reduce((a, r) => Math.max(a, Number(r[k]) || 0), 0);
+  }
+  // A metric nobody scored in (no objective recorded all tournament) would
+  // otherwise drag every score down by its full weight. Drop it and share its
+  // weight among the rest.
+  const active = Object.keys(MVP_WEIGHTS).filter((k) => best[k] > 0);
+  const totalWeight = active.reduce((a, k) => a + MVP_WEIGHTS[k], 0) || 1;
+
+  const leaders = qualified.map((r) => {
+    const parts = {};
+    let score = 0;
+    for (const k of active) {
+      const pct = ((Number(r[k]) || 0) / best[k]) * 100;
+      parts[k] = Number(pct.toFixed(1));
+      score += pct * (MVP_WEIGHTS[k] / totalWeight);
+    }
+    return { ...r, parts, score: Number(score.toFixed(1)) };
+  }).sort((a, b) => b.score - a.score || (b.combat || 0) - (a.combat || 0));
+
+  return {
+    min_matches: minMatches,
+    max_matches: maxMatches,
+    considered: rows.length,
+    qualified: qualified.length,
+    weights: MVP_WEIGHTS,
+    metrics_used: active,
+    leaders: leaders.slice(0, Math.max(1, Number(limit) || 10)),
+  };
+}
+
+// Everyone who played, then ranked. Omit `tournament` for an all-time MVP.
+function tournamentMvp(tournament, opts = {}) {
+  const filters = tournament ? { tournament } : {};
+  const rows = buildAggregate("player", filters, { sort: "matches", limit: 500 });
+  return { tournament: tournament || null, ...scoreMvp(rows, opts) };
+}
+
 function toCsv(rows) {
   if (!rows.length) return "";
   const cols = Object.keys(rows[0]);
@@ -465,4 +541,5 @@ module.exports = {
   playerProfile, teamProfile,
   getMatchByPod, getMatchById, listMatches, listTournaments, listMaps,
   editMatchPlayer, matchEdits, toCsv,
+  scoreMvp, tournamentMvp, MVP_WEIGHTS,
 };

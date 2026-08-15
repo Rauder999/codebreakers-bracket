@@ -211,6 +211,11 @@ async function handle(req, res) {
         return sendJson(res, 200, { ok: true, group_by: groupBy, rows });
       }
 
+      // Tournament MVP. Omit tournament for an all-time ranking.
+      if (pathname === "/api/mvp") {
+        return sendJson(res, 200, { ok: true, ...Q.tournamentMvp(q.tournament || null, { limit: q.limit || 10 }) });
+      }
+
       if (pathname === "/api/export.csv") {
         const groupBy = q.group_by || "player";
         if (!Q.DIMENSIONS[groupBy]) return sendJson(res, 400, { ok: false, error: "unknown group_by" });

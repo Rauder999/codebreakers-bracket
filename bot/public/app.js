@@ -162,7 +162,10 @@ const METRICS = [
   { key: "support", label: "Support" },
   { key: "objective", label: "Objective" },
   { key: "elims_per_match", label: "Elims/match" },
+  { key: "assists_per_match", label: "Assists/match" },
   { key: "combat_per_match", label: "Combat/match" },
+  { key: "support_per_match", label: "Support/match" },
+  { key: "objective_per_match", label: "Objective/match" },
   { key: "wins", label: "Wins" },
   { key: "avg_placement", label: "Avg placement" },
   { key: "matches", label: "Matches" },
@@ -532,6 +535,73 @@ function enableEditing(card) {
 
 // --- routing ---------------------------------------------------------------
 
+// --- MVP --------------------------------------------------------------------
+
+const MVP_PARTS = [
+  { key: "combat_per_match", label: "Combat", weight: "40%" },
+  { key: "kd", label: "K/D", weight: "30%" },
+  { key: "support_per_match", label: "Support", weight: "15%" },
+  { key: "objective_per_match", label: "Objective", weight: "15%" },
+];
+
+async function viewMvp() {
+  setBusy("Working out who had the best tournament...");
+  const d = await api(`/api/mvp?${qs({ limit: 10 })}`);
+
+  const scope = FILTERS.tournament
+    ? (LOOKUPS.tournaments.find((t) => t.code === FILTERS.tournament) || {}).name || FILTERS.tournament
+    : "all tournaments";
+
+  if (!d.leaders.length) {
+    return main.replaceChildren(
+      filterBar(render, { showClass: false, showMap: false, showMin: false }),
+      el("div", { class: "card" }, el("h2", {}, "MVP"),
+        el("div", { class: "empty" }, d.considered
+          ? `Nobody has played the ${d.min_matches} matches needed to qualify yet.`
+          : "No stats recorded for this tournament yet.")));
+  }
+
+  const [winner, ...rest] = d.leaders;
+
+  // Each bar is that player's share of the best in the field for that metric,
+  // which is what the weighted score is built from.
+  const bars = (r) => el("div", { class: "tiles" }, MVP_PARTS.map((p) => el("div", { class: "tile" },
+    el("div", { class: "v" }, num(r.parts[p.key], 1) + "%"),
+    el("div", { class: "k" }, p.label),
+    el("div", { class: "n" }, `${num(r[p.key], p.key === "kd" ? 2 : 0)} \u00B7 ${p.weight} of score`))));
+
+  main.replaceChildren(
+    filterBar(render, { showClass: false, showMap: false, showMin: false }),
+
+    el("div", { class: "card" },
+      el("h2", {}, "Tournament MVP", el("span", { class: "sub" }, scope)),
+      el("div", { class: "tiles" },
+        el("div", { class: "tile" },
+          el("div", { class: "v" }, el("a", { href: `#/players/${winner.key}` }, winner.label)),
+          el("div", { class: "k" }, "MVP"),
+          el("div", { class: "n" }, `${num(winner.score, 1)} MVP score \u00B7 ${num(winner.matches)} match${winner.matches === 1 ? "" : "es"}`))),
+      bars(winner),
+      el("div", { class: "note muted" },
+        `Each number above is that player's share of the best in the field for that metric, weighted `,
+        `40% combat, 30% K/D, 15% support, 15% objective. Placement is not part of it -- a player `,
+        `knocked out early can still win. `,
+        `${d.qualified} of ${d.considered} players qualified, needing ${d.min_matches} `,
+        `match${d.min_matches === 1 ? "" : "es"} (half the deepest run of ${d.max_matches}).`)),
+
+    el("div", { class: "card" },
+      el("h2", {}, "Runners-up"),
+      dataTable(rest, [
+        { key: "label", label: "Player", left: true, fmt: (r) => el("a", { href: `#/players/${r.key}` }, r.label) },
+        { key: "score", label: "MVP score", bar: true, fmt: (r) => num(r.score, 1) },
+        { key: "matches", label: "Matches" },
+        { key: "combat_per_match", label: "Combat/m", fmt: (r) => num(r.combat_per_match, 0) },
+        { key: "kd", label: "K/D", fmt: (r) => num(r.kd, 2) },
+        { key: "support_per_match", label: "Support/m", fmt: (r) => num(r.support_per_match, 0) },
+        { key: "objective_per_match", label: "Obj/m", fmt: (r) => num(r.objective_per_match, 0) },
+        { key: "assists_per_match", label: "Assists/m", fmt: (r) => num(r.assists_per_match, 2) },
+      ], { emptyText: "Nobody else qualified." })));
+}
+
 // --- users (owners only) ---------------------------------------------------
 
 /**
@@ -668,6 +738,7 @@ async function render() {
     if (view === "teams") return await viewTeams(query.get("q") || "");
     if (view === "matches" && parts[1]) return await viewMatch(parts[1]);
     if (view === "matches") return await viewMatches();
+    if (view === "mvp") return await viewMvp();
     if (view === "users") return await viewUsers();
     return await viewLeaderboard();
   } catch (e) {
