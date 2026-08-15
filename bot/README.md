@@ -53,6 +53,22 @@ sessions, import registrations, start/archive/delete tournaments it owns.
 **Delete** (removes the live session). Player stats live in the stats DB on the
 VM and are not touched by either.
 
+**Emergency access (set up 2026-08-15, tested):** you can fix and deploy EVERY
+component without Rauder:
+- *Bot* — yours already (`/opt/cb-bot`, systemd `cb-bot`).
+- *Worker (API/state)* — repo clone lives at `~/codebreakers-bracket` on this
+  VM; a scoped Cloudflare API token is at `~/.cloudflare-token` (chmod 600).
+  Deploy: `cd ~/codebreakers-bracket/worker &&
+  CLOUDFLARE_API_TOKEN=$(cat ~/.cloudflare-token) npx wrangler deploy`.
+  Remember `git pull` first.
+- *Frontend (GitHub Pages)* — you have push access to
+  `Rauder999/codebreakers-bracket` (accept the collaborator invite). Build:
+  `npm install && npm run build` in the repo root, copy
+  `dist/public/index.html` + new `dist/public/assets/*` bundle to the repo
+  root/`assets/`, update the hash reference, push to `main` — Pages redeploys
+  automatically. The engine (`client/src/lib/bracketEngine.ts`) is shared with
+  the worker: if you touch it, redeploy the worker too.
+
 ## 1. The big picture
 
 CodeBreakers runs THE FINALS community tournaments. The stack has three parts:
