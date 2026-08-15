@@ -5,22 +5,37 @@
 // signs people in with Discord, the tournament roster is keyed on Discord
 // usernames, and it means nobody has to be issued another password.
 //
-// Access control has three gates, in order:
-//   1. requireGuildId  -- if set, the user must be a member of that guild.
-//                         This is the real gate; it keeps the site to the
-//                         community rather than to anyone with a Discord
-//                         account. Needs the "guilds" scope.
-//   2. allowDiscordIds -- if non-empty, an explicit allowlist on top.
-//   3. adminDiscordIds -- the OWNERS. They get the admin ("mod") role, and
-//                         they alone can grant it to others on the Users page,
-//                         which writes the moderators table. Anyone in that
-//                         table gets the mod role too, resolved per request.
+// The site is INVITE-ONLY. Being in the CodeBreakers Discord is not enough on
+// its own -- the guild holds far more people than should be reading match data
+// -- so somebody must have been let in explicitly. Three ways to be allowed:
+//
+//   1. adminDiscordIds -- the OWNERS, from config.json. Always allowed, hold
+//                         the mod role permanently, and are the only people
+//                         who can grant either role. Config-only, so the
+//                         recovery path never depends on the database.
+//   2. moderators       -- granted on the Users page. Read, plus stat
+//                         corrections and result confirmation.
+//   3. viewers          -- granted on the Users page. Read only.
+//
+// allowDiscordIds in config still grants read access, as a way to let somebody
+// in without a database write.
+//
+// Every one of those is resolved on EVERY request, not stamped into the
+// session at login: removing somebody ends their access on their next click
+// instead of leaving a valid cookie behind for a month.
+//
+// requireGuildId is no longer consulted. It used to BE the gate, and keeping
+// it as an extra requirement would only have meant "invited AND in the guild",
+// which blocks the casters and partner-org people an invite exists to let in.
+// The invite list replaced it and is strictly stricter: guild membership used
+// to be sufficient by itself and now grants nothing. The config key is left in
+// place, unused, rather than silently changing what it means.
 //
 // Sessions are opaque random ids in a table, not JWTs: logout and revocation
 // then actually work, and there is no signing key to leak.
 // ============================================================================
 const crypto = require("crypto");
-const { db, now, isModerator, addModerator } = require("../stats/db");
+const { db, now, isModerator, addModerator, isViewer, addViewer } = require("../stats/db");
 
 const DISCORD_API = "https://discord.com/api/v10";
 const COOKIE = "cbstats_sid";
@@ -89,6 +104,19 @@ module.exports = function createAuth(CFG, ENV) {
     console.log("auth: Discord OAuth not configured (need stats.discordClientId, stats.baseUrl and DISCORD_CLIENT_SECRET) \u2014 login disabled");
   }
 
+  /**
+   * May this Discord account read the stats site at all?
+   *
+   * Fail-closed on purpose: if the tables were ever empty or unreadable the
+   * answer is "only the config owners", never "everybody". Checked on every
+   * request, so revoking somebody takes their existing session with it.
+   */
+  function hasAccess(discordId) {
+    const id = String(discordId || "");
+    if (!id) return false;
+    return adminIds.has(id) || allowIds.has(id) || isModerator(id) || isViewer(id);
+  }
+
   const scopes = ["identify"].concat(requireGuildIds.length ? ["guilds"] : []);
   const pendingStates = new Map(); // state -> { at, returnTo }
 
@@ -142,14 +170,8 @@ module.exports = function createAuth(CFG, ENV) {
     const token = await exchangeCode(code);
     const me = await discordGet("/users/@me", token.access_token);
 
-    if (requireGuildIds.length) {
-      const guilds = await discordGet("/users/@me/guilds", token.access_token);
-      if (!guilds.some((g) => requireGuildIds.includes(g.id))) {
-        return { error: "you must be a member of the CodeBreakers Discord to view stats" };
-      }
-    }
-    if (allowIds.size && !allowIds.has(me.id)) {
-      return { error: "this account is not on the stats allowlist" };
+    if (!hasAccess(me.id)) {
+      return { error: "this Discord account has not been given access to the CodeBreakers stats site. Ask Playr or Rauder to add you." };
     }
 
     const ts = now();
@@ -167,6 +189,11 @@ module.exports = function createAuth(CFG, ENV) {
     if (!adminIds.has(me.id) && isModerator(me.id) && me.username) {
       addModerator({ discord_id: me.id, username: me.username });
     }
+    // Same for an invited viewer: the owner only had a Discord id to type in,
+    // so the list shows a bare number until the person first signs in.
+    if (isViewer(me.id) && me.username) {
+      addViewer({ discord_id: me.id, username: me.username });
+    }
 
     const sid = crypto.randomBytes(32).toString("hex");
     const maxAge = sessionDays * 24 * 3600;
@@ -183,6 +210,10 @@ module.exports = function createAuth(CFG, ENV) {
     if (!sid) return null;
     const row = stmts.getSession.get(sid, now());
     if (!row) return null;
+    // Access is re-checked here, not trusted from the session. Removing
+    // somebody from the viewers list ends their current session on the next
+    // request rather than leaving a working cookie behind for a month.
+    if (!hasAccess(row.discord_id)) return null;
     // Admin comes from config + the moderators table on every request, not
     // from the row written at login: granting somebody the mod role on the
     // Users page takes effect on their next click instead of requiring them
@@ -206,7 +237,7 @@ module.exports = function createAuth(CFG, ENV) {
   }
 
   return {
-    enabled, loginUrl, completeCallback, currentUser, logout,
+    enabled, loginUrl, completeCallback, currentUser, logout, hasAccess,
     sessionCookie, clearCookie, COOKIE,
   };
 };

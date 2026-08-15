@@ -185,6 +185,20 @@ db.exec(`
     added_at   INTEGER NOT NULL
   );
 
+  -- Who may read the stats site at all. The site is invite-only: being in the
+  -- CodeBreakers Discord is not enough on its own, because the guild has far
+  -- more people in it than should see unreleased match data.
+  --
+  -- Access is owners + moderators + this table, resolved on EVERY request
+  -- rather than at login, so removing somebody ends their existing session on
+  -- their next click instead of leaving it alive until it expires.
+  CREATE TABLE IF NOT EXISTS viewers (
+    discord_id TEXT PRIMARY KEY,
+    username   TEXT,
+    added_by   TEXT,
+    added_at   INTEGER NOT NULL
+  );
+
   -- Web service identity (Discord OAuth).
   CREATE TABLE IF NOT EXISTS users (
     discord_id    TEXT PRIMARY KEY,
@@ -303,6 +317,18 @@ const stmts = {
   delModerator: db.prepare(`DELETE FROM moderators WHERE discord_id = ?`),
   selModerator: db.prepare(`SELECT 1 FROM moderators WHERE discord_id = ?`),
   allModerators: db.prepare(`SELECT * FROM moderators ORDER BY added_at`),
+
+  // Same audit rules as moderators: a re-add refreshes the name, never the
+  // record of who first let this person in.
+  addViewer: db.prepare(`
+    INSERT INTO viewers (discord_id, username, added_by, added_at)
+    VALUES (@discord_id, @username, @added_by, @ts)
+    ON CONFLICT(discord_id) DO UPDATE SET
+      username = COALESCE(excluded.username, viewers.username)
+  `),
+  delViewer: db.prepare(`DELETE FROM viewers WHERE discord_id = ?`),
+  selViewer: db.prepare(`SELECT 1 FROM viewers WHERE discord_id = ?`),
+  allViewers: db.prepare(`SELECT * FROM viewers ORDER BY added_at`),
 };
 
 function upsertTournament(code, name) {
@@ -383,9 +409,36 @@ function listModerators() {
   return stmts.allModerators.all();
 }
 
+// --- viewers ----------------------------------------------------------------
+// Read access to the stats site. Owners and moderators have it inherently and
+// need no row here.
+
+function addViewer({ discord_id, username, added_by }) {
+  stmts.addViewer.run({
+    discord_id: String(discord_id),
+    username: username || null,
+    added_by: added_by || null,
+    ts: now(),
+  });
+}
+
+// True if the row existed (false tells the caller there was nothing to do).
+function removeViewer(discordId) {
+  return stmts.delViewer.run(String(discordId)).changes > 0;
+}
+
+function isViewer(discordId) {
+  return !!stmts.selViewer.get(String(discordId || ""));
+}
+
+function listViewers() {
+  return stmts.allViewers.all();
+}
+
 module.exports = {
   db, DB_PATH,
   embarkKey, baseKey, teamKey, toInt, now,
   upsertTournament, upsertTeam, upsertPlayer, upsertTeamMember, resolvePlayer,
   addModerator, removeModerator, isModerator, listModerators,
+  addViewer, removeViewer, isViewer, listViewers,
 };

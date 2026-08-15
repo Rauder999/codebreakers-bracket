@@ -28,7 +28,7 @@ const ENV = Object.fromEntries(envText.split("\n").filter((l) => l.includes("=")
 const Q = require("./queries");
 const createAuth = require("./auth");
 const auth = createAuth(CFG, ENV);
-const { addModerator, removeModerator, listModerators } = require("../stats/db");
+const { addModerator, removeModerator, listModerators, addViewer, removeViewer, listViewers } = require("../stats/db");
 
 const S = CFG.stats || {};
 const PORT = Number(S.port) || 8110;
@@ -259,6 +259,43 @@ async function handle(req, res) {
 
         return sendJson(res, 405, { ok: false, error: "method not allowed" });
       }
+      // Read access. Same owner-only gate and same id rules as moderators;
+      // the difference is only what the grant buys you.
+      if (pathname === "/api/viewers") {
+        if (!user.is_owner) return sendJson(res, 403, { ok: false, error: "only owners can manage who has access" });
+
+        if (req.method === "GET") {
+          return sendJson(res, 200, { ok: true, viewers: listViewers() });
+        }
+
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          const id = String(body.discord_id || "").trim();
+          if (!/^\d{17,20}$/.test(id)) {
+            return sendJson(res, 400, { ok: false, error: "that is not a Discord user id -- turn on Developer Mode in Discord, right-click the person and Copy User ID" });
+          }
+          if (OWNER_IDS.has(id)) {
+            return sendJson(res, 400, { ok: false, error: "that account is an owner and already has access" });
+          }
+          const username = body.username ? String(body.username).trim().slice(0, 64) : null;
+          addViewer({ discord_id: id, username, added_by: user.username || user.discord_id });
+          return sendJson(res, 200, { ok: true, viewers: listViewers() });
+        }
+
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }
+      m = pathname.match(/^\/api\/viewers\/(\d+)$/);
+      if (m && req.method === "DELETE") {
+        if (!user.is_owner) return sendJson(res, 403, { ok: false, error: "only owners can manage who has access" });
+        if (OWNER_IDS.has(m[1])) {
+          return sendJson(res, 400, { ok: false, error: "owners are set in config.json on the VM and cannot be removed here" });
+        }
+        // Removing a viewer ends their current session too: web/auth.js
+        // re-checks access on every request rather than trusting the cookie.
+        const removed = removeViewer(m[1]);
+        return sendJson(res, 200, { ok: true, removed, viewers: listViewers() });
+      }
+
       m = pathname.match(/^\/api\/users\/(\d+)$/);
       if (m && req.method === "DELETE") {
         if (!user.is_owner) return sendJson(res, 403, { ok: false, error: "only owners can manage moderators" });

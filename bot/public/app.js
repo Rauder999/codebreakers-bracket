@@ -543,9 +543,9 @@ function enableEditing(card) {
  * confirmation line across the reload that follows a change.
  */
 async function viewUsers(notice) {
-  if (!ME || !ME.is_owner) return showError(new Error("Only owners can manage moderators."));
+  if (!ME || !ME.is_owner) return showError(new Error("Only owners can manage access."));
   setBusy();
-  const { owners, moderators } = await api("/api/users");
+  const [{ owners, moderators }, { viewers }] = await Promise.all([api("/api/users"), api("/api/viewers")]);
 
   const idInput = el("input", { type: "text", placeholder: "Discord user id", inputmode: "numeric" });
   const nameInput = el("input", { type: "text", placeholder: "Name (optional)" });
@@ -573,6 +573,33 @@ async function viewUsers(notice) {
     } catch (e) { fail(e); }
   };
 
+  // --- read access ---
+  const vIdInput = el("input", { type: "text", placeholder: "Discord user id", inputmode: "numeric" });
+  const vNameInput = el("input", { type: "text", placeholder: "Name (optional)" });
+  const vmsg = el("div", { class: "note" });
+  const vfail = (e) => vmsg.replaceChildren(el("span", { class: "error" }, e.message));
+
+  const invite = async () => {
+    try {
+      const id = vIdInput.value.trim();
+      await api("/api/viewers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discord_id: id, username: vNameInput.value.trim() || null }),
+      });
+      viewUsers(`Gave access to ${vNameInput.value.trim() || id}.`);
+    } catch (e) { vfail(e); }
+  };
+
+  const uninvite = async (r) => {
+    const who = r.username || r.discord_id;
+    if (!window.confirm(`Remove ${who}'s access to the stats site? They will be signed out immediately.`)) return;
+    try {
+      await api(`/api/viewers/${r.discord_id}`, { method: "DELETE" });
+      viewUsers(`Removed ${who}'s access.`);
+    } catch (e) { vfail(e); }
+  };
+
   main.replaceChildren(
     el("div", { class: "card" },
       el("h2", {}, "Owners", el("span", { class: "sub" }, "set in config.json on the VM, not from here")),
@@ -593,7 +620,24 @@ async function viewUsers(notice) {
         { key: "added_by", label: "Added by", left: true, fmt: (r) => r.added_by || "\u2013" },
         { key: "added_at", label: "Added", left: true, fmt: (r) => when(r.added_at) },
         { key: "_remove", label: "", fmt: (r) => el("button", { class: "btn", onclick: () => revoke(r) }, "Remove") },
-      ], { rowId: (r) => r.discord_id, emptyText: "No moderators yet. The owners above are the only people who can edit stats." })));
+      ], { rowId: (r) => r.discord_id, emptyText: "No moderators yet. The owners above are the only people who can edit stats." })),
+
+    el("div", { class: "card" },
+      el("h2", {}, "Who can see the stats", el("span", { class: "sub" }, "read only")),
+      vmsg,
+      el("div", { class: "field" }, vIdInput, vNameInput,
+        el("button", { class: "btn primary", onclick: invite }, "Give access")),
+      el("div", { class: "note muted" },
+        "The site is invite-only: being in the CodeBreakers Discord is not enough on its own. ",
+        "Owners and moderators always have access and do not need a row here. ",
+        "Removing somebody ends the session they are already signed in with."),
+      dataTable(viewers, [
+        { key: "username", label: "Person", left: true, fmt: (r) => r.username || el("span", { class: "muted" }, "unknown until first sign-in") },
+        { key: "discord_id", label: "Discord id", left: true, fmt: (r) => r.discord_id },
+        { key: "added_by", label: "Invited by", left: true, fmt: (r) => r.added_by || "\u2013" },
+        { key: "added_at", label: "Invited", left: true, fmt: (r) => when(r.added_at) },
+        { key: "_remove", label: "", fmt: (r) => el("button", { class: "btn", onclick: () => uninvite(r) }, "Remove") },
+      ], { rowId: (r) => r.discord_id, emptyText: "Nobody has been invited yet, so only the owners and moderators above can see the site." })));
 }
 
 function debounce(fn, ms) {

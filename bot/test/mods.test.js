@@ -51,6 +51,9 @@ test("a stored moderator gets the stats-site admin role at request time", () => 
                     VALUES ('333', 'discordmod', NULL, NULL, 'viewer', ?, ?)`).run(ts, ts);
   store.db.prepare(`INSERT OR REPLACE INTO sessions (id, discord_id, created_at, expires_at) VALUES ('sid-mod', '333', ?, ?)`)
     .run(ts, ts + 3600e3);
+  // The site is invite-only, so give them read access first: this test is
+  // about gaining the MOD role on top, not about getting through the door.
+  store.addViewer({ discord_id: "333", username: "discordmod", added_by: "test" });
   const req = { headers: { cookie: "cbstats_sid=sid-mod" } };
 
   assert.strictEqual(auth.currentUser(req).is_admin, false, "not an admin before the grant");

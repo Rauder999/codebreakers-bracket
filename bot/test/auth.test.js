@@ -15,7 +15,7 @@ process.env.CB_STATS_DB = process.env.CB_STATS_DB
   || path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cb-auth-")), "test.db");
 
 const createAuth = require("../web/auth");
-const { db, now } = require("../stats/db");
+const { db, now, addViewer } = require("../stats/db");
 
 // The real config, so a bad edit to config.json fails here rather than in prod.
 const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8"));
@@ -27,10 +27,21 @@ test("config names Playr and Rauder as admins", () => {
   assert.ok(CFG.stats.adminDiscordIds.includes(RAUDER), "Rauder must be an admin");
 });
 
-test("viewing is gated to a Discord server, not open to any account", () => {
-  const gate = CFG.stats.requireGuildId;
-  const ids = Array.isArray(gate) ? gate : [gate].filter(Boolean);
-  assert.ok(ids.length > 0, "requireGuildId must be set or anyone with Discord can read the stats");
+test("viewing is invite-only, not open to anyone with a Discord account", () => {
+  // This used to assert requireGuildId was set, on the grounds that guild
+  // membership was the gate. It is not any more: the guild has far more people
+  // in it than should see match data, so access is now an explicit list and
+  // requireGuildId is no longer consulted. The protection worth pinning is
+  // that an unknown account gets nothing.
+  const auth = createAuth(CFG, { DISCORD_CLIENT_SECRET: "test-secret" });
+
+  assert.strictEqual(auth.hasAccess("100000000000000001"), false, "a stranger has no access");
+  assert.strictEqual(auth.hasAccess(""), false, "and neither does a missing id");
+  assert.strictEqual(auth.hasAccess(null), false);
+
+  for (const owner of CFG.stats.adminDiscordIds) {
+    assert.strictEqual(auth.hasAccess(owner), true, `owner ${owner} must never be locked out`);
+  }
 });
 
 test("login URL carries the right redirect, scopes and state", () => {
@@ -81,9 +92,13 @@ test("a non-admin member is a viewer", () => {
               VALUES ('999', 'someone', NULL, NULL, 'admin', ?, ?)`).run(ts, ts);
   db.prepare(`INSERT OR REPLACE INTO sessions (id, discord_id, created_at, expires_at) VALUES ('sid-other', '999', ?, ?)`)
     .run(ts, ts + 3600e3);
+  // Invited, so they can see the site at all -- the point here is that the
+  // stale 'admin' string stored on the row must not promote them.
+  addViewer({ discord_id: "999", username: "someone", added_by: "test" });
 
   const user = auth.currentUser({ headers: { cookie: "cbstats_sid=sid-other" } });
   assert.strictEqual(user.is_admin, false, "a stored role of admin must not grant admin");
+  assert.strictEqual(user.role, "viewer");
 });
 
 test("an expired session is not a session", () => {

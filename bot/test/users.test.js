@@ -30,12 +30,17 @@ const TARGET = "900000000000000002";
 // --- harness ----------------------------------------------------------------
 
 // A signed-in session for `id`, returned as the cookie header the router reads.
-function signIn(id, sid) {
+//
+// The site is invite-only, so a session row alone is not access: anyone who is
+// not an owner also needs a viewers row. Pass { access: false } for the tests
+// that are specifically about somebody who was never let in.
+function signIn(id, sid, { access = true } = {}) {
   const ts = store.now();
   store.db.prepare(`INSERT OR REPLACE INTO users (discord_id, username, global_name, avatar, role, created_at, last_login_at)
                     VALUES (?, ?, NULL, NULL, 'viewer', ?, ?)`).run(id, `user${id}`, ts, ts);
   store.db.prepare(`INSERT OR REPLACE INTO sessions (id, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
     .run(sid, id, ts, ts + 3600e3);
+  if (access && id !== OWNER) store.addViewer({ discord_id: id, username: `user${id}`, added_by: "test" });
   return { cookie: `cbstats_sid=${sid}` };
 }
 
@@ -132,6 +137,78 @@ test("a username is not accepted where a Discord id is required", async () => {
     assert.match(json.error, /Developer Mode/, "the error should say how to find the id");
   }
   assert.strictEqual(store.listModerators().length, 0, "nothing was written by the rejected calls");
+});
+
+// --- invite-only read access ------------------------------------------------
+
+test("a signed-in Discord account that was never invited has no access", async () => {
+  const strangerHeaders = signIn("900000000000000777", "sid-stranger", { access: false });
+  const auth = createAuth(CFG, { DISCORD_CLIENT_SECRET: "test-secret" });
+
+  assert.strictEqual(auth.currentUser({ headers: strangerHeaders }), null,
+    "a valid session cookie is not access on its own");
+  // And the API agrees: they look signed out, not merely unprivileged.
+  assert.strictEqual((await call("GET", "/api/players", { headers: strangerHeaders })).status, 401);
+});
+
+test("an invite takes effect on the existing session, and so does removing it", async () => {
+  const headers = signIn(OWNER, "sid-owner");
+  const stranger = "900000000000000778";
+  const strangerHeaders = signIn(stranger, "sid-stranger2", { access: false });
+  const auth = createAuth(CFG, { DISCORD_CLIENT_SECRET: "test-secret" });
+
+  assert.strictEqual(auth.currentUser({ headers: strangerHeaders }), null);
+
+  const invited = await call("POST", "/api/viewers", { headers, body: { discord_id: stranger, username: "guest" } });
+  assert.strictEqual(invited.status, 200);
+  const me = auth.currentUser({ headers: strangerHeaders });
+  assert.ok(me, "the session they already had now works");
+  assert.strictEqual(me.is_admin, false, "read access is not the mod role");
+  assert.strictEqual(me.is_owner, false);
+
+  // Revocation has to reach the live session, or a removed person keeps
+  // reading for the 30 days their cookie has left.
+  const removed = await call("DELETE", `/api/viewers/${stranger}`, { headers });
+  assert.strictEqual(removed.status, 200);
+  assert.strictEqual(auth.currentUser({ headers: strangerHeaders }), null,
+    "removing access must end the session they are already using");
+});
+
+test("owners and moderators have access without a viewers row", async () => {
+  const auth = createAuth(CFG, { DISCORD_CLIENT_SECRET: "test-secret" });
+  const ownerHeaders = signIn(OWNER, "sid-owner");
+  assert.ok(auth.currentUser({ headers: ownerHeaders }), "an owner is never locked out");
+  assert.ok(!store.listViewers().some((v) => v.discord_id === OWNER), "and needs no row to prove it");
+
+  const modId = "900000000000000779";
+  const modHeaders = signIn(modId, "sid-mod2", { access: false });
+  assert.strictEqual(auth.currentUser({ headers: modHeaders }), null);
+  store.addModerator({ discord_id: modId, username: "modonly", added_by: "test" });
+  assert.ok(auth.currentUser({ headers: modHeaders }), "the mod role carries read access with it");
+  store.removeModerator(modId);
+});
+
+test("only owners can manage who has access", async () => {
+  const modId = "900000000000000780";
+  const modHeaders = signIn(modId, "sid-mod3");
+  store.addModerator({ discord_id: modId, username: "amod", added_by: "test" });
+
+  assert.strictEqual((await call("GET", "/api/viewers", { headers: modHeaders })).status, 403);
+  assert.strictEqual((await call("POST", "/api/viewers", { headers: modHeaders, body: { discord_id: "900000000000000781" } })).status, 403);
+  assert.strictEqual((await call("DELETE", "/api/viewers/900000000000000781", { headers: modHeaders })).status, 403);
+
+  store.removeModerator(modId);
+});
+
+test("an invite needs a Discord id, and an owner cannot be un-invited", async () => {
+  const headers = signIn(OWNER, "sid-owner");
+
+  const bad = await call("POST", "/api/viewers", { headers, body: { discord_id: "someguy" } });
+  assert.strictEqual(bad.status, 400);
+  assert.match(bad.error || bad.json.error, /Developer Mode/);
+
+  const owner = await call("DELETE", `/api/viewers/${OWNER}`, { headers });
+  assert.strictEqual(owner.status, 400, "an owner's access is not revocable over HTTP");
 });
 
 test("owners cannot be granted, revoked or removed through the API", async () => {
