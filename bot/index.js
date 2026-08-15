@@ -209,6 +209,11 @@ try {
 } catch (e) { console.error("matches module failed to load:", e.message); }
 
 // \u2500\u2500\u2500 Entrypoint \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Joining a big community server can be undone in seconds by third-party
+// security bots that auto-kick new bots - log both directions so we can see it.
+client.on("guildCreate", (g) => console.log(`joined guild: ${g.id} ${g.name}`));
+client.on("guildDelete", (g) => console.log(`removed from guild: ${g.id} ${g.name || "(unavailable)"}`));
+
 client.once("clientReady", async () => {
   console.log(`logged in as ${client.user.tag}; guilds: ${[...client.guilds.cache.values()].map((g) => g.name).join(", ") || "none"}`);
   if (matchesApi && cmd !== "sync-roles") {
