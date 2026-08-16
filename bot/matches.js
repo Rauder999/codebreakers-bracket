@@ -92,20 +92,23 @@ module.exports = function setupMatches(ctx) {
   // Discord offers exactly one quiet way into a private thread: mentions added
   // by EDITING a message pull the users in without any notification. A fresh
   // send would ping; thread.members.add() pings "you were added" per player.
-  async function silentAddMembers(thread, discords) {
+  // extraIds are raw Discord user ids (moderators) added alongside the roster.
+  async function silentAddMembers(thread, discords, extraIds) {
     const g = await mainGuild();
-    const mentions = [];
+    const ids = new Set();
     for (const d of discords) {
       const m = g ? findMember(g, d) : null;
-      if (m) mentions.push(`<@${m.id}>`);
+      if (m) ids.add(m.id);
     }
-    if (!mentions.length) return 0;
+    for (const id of extraIds || []) ids.add(String(id));
+    if (!ids.size) return 0;
+    const mentions = [...ids].map((id) => `<@${id}>`);
     try {
       const msg = await thread.send({ content: "\u200B" });
       await msg.edit({ content: mentions.join(" ") });
       await msg.delete();
     } catch (e) { console.error("matches: silent add failed:", e.message); }
-    return mentions.length;
+    return ids.size;
   }
   // Best seed first; unseeded teams last, stable by name.
   function seedOrder(teams) {
@@ -130,6 +133,8 @@ module.exports = function setupMatches(ctx) {
     for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
     return rows;
   }
+  const banTimerSec = () => { const n = Number(CFG.banTimerSec); return isFinite(n) && n > 0 ? n : 30; };
+
   function banEmbed(entry) {
     const banned = new Map(entry.bans.map((b) => [b.map, b.team]));
     const lines = entry.pool.map((m) => banned.has(m)
@@ -140,6 +145,7 @@ module.exports = function setupMatches(ctx) {
       title: `${SWORDS} Map bans ${DASH} ${entry.label}`,
       description: [
         `Each team bans one map, best seed first. The last map standing is played.`,
+        `You have **${banTimerSec()}s** per pick ${DASH} run out of time and a random map is banned for you.`,
         "",
         lines.join("\n"),
         "",
@@ -226,9 +232,12 @@ module.exports = function setupMatches(ctx) {
 
     // Players join silently: the channel announcement is the single ping they
     // get; the thread itself must not fire a second wave of notifications.
+    // Moderators (config owners + /mod add) join every private thread too -
+    // they post observer codes for streamed matches and resolve disputes.
     // A reused series thread already has everyone in it.
     if (!reusedSeries) {
-      const added = await silentAddMembers(thread, Object.values(rosters).flat());
+      const modIds = (mods && mods.moderatorIds) ? mods.moderatorIds() : [];
+      const added = await silentAddMembers(thread, Object.values(rosters).flat(), modIds);
       if (!added) console.error(`matches: no members resolved for ${k} - check discords in the bracket`);
     }
 
@@ -251,6 +260,7 @@ module.exports = function setupMatches(ctx) {
       entry.pool = pickPool(pod.teams.length + 1);
       const msg = await thread.send({ embeds: [banEmbed(entry)], components: banRows(entry) });
       entry.banMsgId = msg.id;
+      entry.banTurnAt = Date.now(); // the pick clock starts for the first team
       save();
     } else {
       entry.decidedMap = pod.map || null;
@@ -298,6 +308,43 @@ module.exports = function setupMatches(ctx) {
       } catch (e) { console.error("matches: roster sync failed:", e.message); }
     }
   }
+
+  // Ban timer sweep: a team that sits on its pick past the limit gets a random
+  // map banned on its behalf and the turn moves on, so one AFK team can never
+  // stall the whole tournament. Deadlines live on the entry (banTurnAt) and
+  // survive restarts; only threads of currently-watched sessions are policed.
+  async function sweepBanTimers() {
+    const limit = banTimerSec() * 1000;
+    const now = Date.now();
+    for (const entry of Object.values(store.threads)) {
+      if (!entry.banMsgId || entry.decidedMap || !entry.banTurnAt) continue;
+      if (!Array.isArray(entry.pool) || !entry.pool.length) continue;
+      if (entry.bans.length >= entry.order.length) continue;
+      if (!sessions.has(entry.code)) continue;
+      if (now - entry.banTurnAt < limit) continue;
+
+      const turn = entry.order[entry.bans.length];
+      const banned = new Set(entry.bans.map((b) => b.map));
+      const left = entry.pool.filter((m) => !banned.has(m));
+      if (left.length <= 1) { entry.banTurnAt = null; save(); continue; }
+      const map = left[Math.floor(Math.random() * left.length)];
+      entry.bans.push({ map, team: turn, by: "auto (time ran out)" });
+      entry.banTurnAt = Date.now();
+      save();
+      console.log(`matches: auto-ban ${map} for ${turn} in ${entry.key} (timeout)`);
+      try {
+        const thread = await client.channels.fetch(entry.threadId);
+        const msg = await thread.messages.fetch(entry.banMsgId);
+        await msg.edit({ embeds: [banEmbed(entry)], components: banRows(entry) });
+        await thread.send({ content: `\u23F1\uFE0F Time ran out ${DASH} **${map}** was banned for **${turn}** automatically.` });
+        if (entry.bans.length >= entry.order.length) {
+          entry.banTurnAt = null;
+          await finalizeMap(entry, thread);
+        }
+      } catch (e) { console.error(`matches: auto-ban update failed for ${entry.key}:`, e.message); }
+    }
+  }
+  setInterval(() => { sweepBanTimers().catch((e) => console.error("matches ban sweep:", e.message)); }, 5 * 1000);
 
   // Best-of-3 grand final: the series is over when a team has two game wins
   // (or, for a legacy single-pod GF, when that one game is played).
@@ -376,6 +423,7 @@ module.exports = function setupMatches(ctx) {
     if (!map || entry.bans.some((b) => b.map === map)) { await i.reply({ content: "That map is already banned.", ephemeral: true }); return; }
 
     entry.bans.push({ map, team: turn, by: i.user.username });
+    entry.banTurnAt = Date.now(); // fresh clock for the next team
     save();
 
     const done = entry.bans.length >= entry.order.length;
