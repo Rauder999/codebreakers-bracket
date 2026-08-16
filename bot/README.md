@@ -168,8 +168,15 @@ it) and runs the setup there:
 - **Map bans.** Pool = `teams + 1` maps drawn from `config.maps`. Teams ban one
   each in **seed order, best seed first**, via buttons. Wrong team / non-player
   gets an ephemeral refusal; a moderator (Manage Server) may ban on a team's
-  behalf. The surviving map is written back to the bracket through
-  `POST /bot/map` and shown to everyone.
+  behalf. Each pick has a **30-second clock** (`banTimerSec` in config.json) —
+  on timeout a random map is banned for the slow team and the turn moves on,
+  so an AFK team can never stall the bracket. The surviving map is written
+  back to the bracket through `POST /bot/map` and shown to everyone.
+- **Moderators are in every thread (2026-08-17).** All moderators (config
+  owners + `/mod add`) are silently added to each private match thread at
+  creation — they post observer codes for streamed matches and settle
+  arguments. Mods appointed mid-tournament only join threads created after
+  their appointment.
 - **How to start.** Normal match: the best-seeded team hosts the lobby and posts
   the code in the thread. Streamed match (`onStream`/`liveNow` in the admin app):
   nobody creates a lobby, everyone waits for the observer's code.
