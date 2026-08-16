@@ -363,7 +363,7 @@ module.exports = function setupMatches(ctx) {
   async function onBanClick(i) {
     const partsCb = i.customId.split(":"); const idxStr = partsCb.pop(); const k = partsCb.slice(1).join(":");
     const entry = store.threads[k];
-    if (!entry) { await i.reply({ content: "This ban phase is no longer tracked (bot restarted).", ephemeral: true }); return; }
+    if (!entry) { await i.reply({ content: "This ban button belongs to a tournament I no longer track (deleted or reset). If your match is current, ask a moderator.", ephemeral: true }); return; }
     if (entry.decidedMap) { await i.reply({ content: `The map is already decided: **${entry.decidedMap}**.`, ephemeral: true }); return; }
 
     const turn = entry.order[entry.bans.length];
@@ -393,7 +393,7 @@ module.exports = function setupMatches(ctx) {
   async function onSubmitClick(i) {
     const k = i.customId.split(":").slice(1).join(":");
     const entry = store.threads[k];
-    if (!entry) { await i.reply({ content: "This match is no longer tracked (bot restarted). Use /result instead.", ephemeral: true }); return; }
+    if (!entry) { await i.reply({ content: "This match is no longer tracked (deleted or reset). Use /result with your screenshot instead.", ephemeral: true }); return; }
     if (!teamOfUser(entry, i.user.username) && !isMod(i)) {
       await i.reply({ content: "Only players in this match can submit its result.", ephemeral: true });
       return;
@@ -652,3 +652,4 @@ module.exports = function setupMatches(ctx) {
   console.log("matches: threads " + (CFG.matchThreads === false ? "OFF" : "ON") + ", map bans " + (bansEnabled() ? "ON" : "OFF"));
   return { onMatchReady, onStateUpdate, registerCommands, channelFor };
 };
+
