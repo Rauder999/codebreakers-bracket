@@ -42,9 +42,11 @@ sessions, import registrations, start/archive/delete tournaments it owns.
   finished 1st, 2nd, ... — the last team's placement is implied. Applies through
   the same pipeline as a confirmed screenshot: propagation, next-round pings
   and thread auto-archive all follow.
-- Wrong/missing discords: fix them in the admin app Setup panel — the bot picks
-  the change up live, quietly adds the right people to the existing thread.
-  Nothing needs restarting.
+- Substitutions / wrong discords / team rename: press **Teams** in the bracket
+  action bar — edit names, players, discords in place and hit Save & Sync. The
+  bracket, the live page and the bot update immediately (new players are
+  quietly pulled into the existing match thread); results and progress are
+  untouched. Nothing needs restarting.
 - A match is stuck (bot missed something): set the placements manually in the
   admin app — propagation and next-round pings resume automatically.
 - Bot misbehaving: `sudo journalctl -u cb-bot -f` to watch,
