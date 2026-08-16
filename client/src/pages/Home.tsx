@@ -399,6 +399,10 @@ export default function Home() {
   // Raw text of roster inputs while focused — otherwise the controlled value
   // re-parses on every keystroke and eats trailing commas/spaces.
   const [rosterDrafts, setRosterDrafts] = useState<Record<string, string>>({});
+  // In-tournament roster editor: substitute players / fix discords / rename a
+  // team without leaving the bracket screen or regenerating the session.
+  const [showTeamEditor, setShowTeamEditor] = useState(false);
+  const [teamDrafts, setTeamDrafts] = useState<{ name: string; players: string; discords: string }[]>([]);
   const clearRosterDraft = (key: string) => setRosterDrafts((prev) => { const next = { ...prev }; delete next[key]; return next; });
   const [previewWide, setPreviewWide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1600);
   useEffect(() => {
@@ -1139,6 +1143,48 @@ export default function Home() {
     setScreen("setup");
     setScreenshotMode(false);
     document.body.classList.remove("screenshot-mode");
+  };
+
+  const openTeamEditor = () => {
+    setTeamDrafts(seeds.map((s) => ({ name: s.name, players: (s.players ?? []).join(", "), discords: (s.discords ?? []).join(", ") })));
+    setShowTeamEditor(true);
+  };
+
+  // Apply roster edits to the live tournament: seeds AND every pod slot that
+  // references the team (pods carry the name and a copy of players for the
+  // live-page tooltip). One full-state PUT so live viewers and the Discord bot
+  // pick the change up immediately.
+  const handleTeamEditorSave = () => {
+    const renames = new Map<string, string>();
+    const playersByName = new Map<string, string[]>();
+    const newSeeds = seeds.map((s, i) => {
+      const d = teamDrafts[i];
+      if (!d) return s;
+      const name = (d.name.trim() || s.name).slice(0, 24);
+      const players = d.players.split(",").map((x) => x.trim()).filter(Boolean);
+      const discords = d.discords.split(",").map((x) => x.trim()).filter(Boolean);
+      if (s.name && name !== s.name) renames.set(s.name, name);
+      if (name) playersByName.set(name, players);
+      return { ...s, name, players, discords };
+    });
+    const newPods = pods.map((p) => ({
+      ...p,
+      teams: p.teams.map((t) => {
+        if (!t.name) return t;
+        const nn = renames.get(t.name) ?? t.name;
+        return { ...t, name: nn, players: playersByName.get(nn) ?? t.players };
+      }),
+    }));
+    setSeeds(newSeeds);
+    setPods(newPods);
+    setShowTeamEditor(false);
+    const stateStr = JSON.stringify({ pods: newPods, tournamentSize, tournamentMode, seeds: newSeeds, formatConfig, globalFormat, finalsBracket, tournamentStarted, screen: "bracket" });
+    if (sessionCodeRef.current && adminToken) {
+      doPutSession(sessionCodeRef.current, stateStr, adminToken);
+      toast.success("Teams updated — live page and Discord bot are in sync");
+    } else {
+      toast.success("Teams updated locally");
+    }
   };
 
   const handleScreenshot = () => {
@@ -2090,6 +2136,7 @@ export default function Home() {
           {tournamentStarted && (
             <span className="cb-chip" style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, letterSpacing: "0.1em", color: "var(--cb-green)", border: "1px solid rgba(40,209,124,0.5)", padding: "3px 8px" }}>STARTED</span>
           )}
+          {adminToken && <button className="cb-btn" style={{ borderColor: "var(--cb-purple)", color: "var(--cb-purple2)" }} onClick={openTeamEditor}>Teams</button>}
           {adminToken && authKind !== "cohost" && <button className="cb-btn" style={{ borderColor: "var(--cb-gold)", color: "var(--cb-gold)" }} onClick={() => setShowArchiveConfirm(true)}>Archive</button>}
           {/* Session chip */}
           {sessionCode && (
@@ -2108,6 +2155,39 @@ export default function Home() {
             </div>
           )}
           <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-muted)", opacity: 0.6, letterSpacing: "0.06em", marginLeft: 4 }}>CTRL+Z UNDO · CTRL+Y REDO</span>
+        </div>
+      )}
+
+      {/* In-tournament roster editor */}
+      {showTeamEditor && (
+        <div className="cb-modal-backdrop" style={{ zIndex: 1100 }} onClick={() => setShowTeamEditor(false)}>
+          <div className="cb-modal" style={{ padding: 24, minWidth: 480, maxWidth: 620, maxHeight: "80vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cb-modal-title" style={{ color: "var(--cb-purple2)", marginBottom: 6 }}>Edit Teams</div>
+            <div style={{ fontSize: 12, color: "var(--cb-muted)", lineHeight: 1.5, marginBottom: 14 }}>
+              Substitute players, fix Discord usernames or rename a team mid-tournament. Applies to the bracket, the live page and the Discord bot immediately — results and progress are untouched.
+            </div>
+            <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
+              {teamDrafts.map((d, i) => (seeds[i]?.name || d.name ? (
+                <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, borderLeft: "3px solid var(--cb-border2)", paddingLeft: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, color: "var(--cb-muted)", minWidth: 24 }}>#{seeds[i]?.seed ?? i + 1}</span>
+                    <input className="team-input" type="text" value={d.name} maxLength={24} placeholder="Team name"
+                      onChange={(e) => setTeamDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))} />
+                  </div>
+                  <input className="team-input players-input" type="text" value={d.players} placeholder="Players: Player1, Player2..."
+                    style={{ marginLeft: 32, opacity: 0.85 }}
+                    onChange={(e) => setTeamDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, players: e.target.value } : x))} />
+                  <input className="team-input players-input" type="text" value={d.discords} placeholder="Discords: user1, user2..."
+                    style={{ marginLeft: 32, opacity: 0.7 }}
+                    onChange={(e) => setTeamDrafts((prev) => prev.map((x, xi) => xi === i ? { ...x, discords: e.target.value } : x))} />
+                </div>
+              ) : null))}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="cb-btn ghost" onClick={() => setShowTeamEditor(false)}>Cancel</button>
+              <button className="cb-btn" style={{ borderColor: "var(--cb-purple)", color: "var(--cb-purple2)", fontWeight: 700 }} onClick={handleTeamEditorSave}>Save &amp; Sync</button>
+            </div>
+          </div>
         </div>
       )}
 
