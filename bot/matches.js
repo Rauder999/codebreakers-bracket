@@ -184,17 +184,31 @@ module.exports = function setupMatches(ctx) {
     }
     const parentId = channelFor(code);
     if (!parentId) return null;
-    const parent = await client.channels.fetch(parentId);
 
     const ordered = seedOrder(pod.teams);
-    const name = `${pod.label}: ${ordered.map((t) => t.name).join(" vs ")}`.slice(0, 100);
-    const thread = await parent.threads.create({
-      name,
-      type: ChannelType.PrivateThread,
-      invitable: false,
-      autoArchiveDuration: 1440,
-      reason: `CodeBreakers match ${k}`,
-    });
+
+    // Bo3 grand final: every game of the series shares ONE thread, so the
+    // finalists are never dragged from thread to thread - game 2/3 bans and
+    // setup are simply posted below game 1 in the same place.
+    let thread = null, reusedSeries = false;
+    if (/^gf-\d+$/.test(pod.id)) {
+      const base = Object.values(store.threads).find((e) => e.code === code && e.threadId && /^gf-\d+$/.test(e.podId) && e.podId !== pod.id);
+      if (base) {
+        try { thread = await client.channels.fetch(base.threadId); reusedSeries = true; }
+        catch { thread = null; }
+      }
+    }
+    if (!thread) {
+      const parent = await client.channels.fetch(parentId);
+      const name = `${pod.label}: ${ordered.map((t) => t.name).join(" vs ")}`.slice(0, 100);
+      thread = await parent.threads.create({
+        name,
+        type: ChannelType.PrivateThread,
+        invitable: false,
+        autoArchiveDuration: 1440,
+        reason: `CodeBreakers match ${k}`,
+      });
+    }
 
     const rosters = rostersOf(s, pod);
 
@@ -212,8 +226,11 @@ module.exports = function setupMatches(ctx) {
 
     // Players join silently: the channel announcement is the single ping they
     // get; the thread itself must not fire a second wave of notifications.
-    const added = await silentAddMembers(thread, Object.values(rosters).flat());
-    if (!added) console.error(`matches: no members resolved for ${k} - check discords in the bracket`);
+    // A reused series thread already has everyone in it.
+    if (!reusedSeries) {
+      const added = await silentAddMembers(thread, Object.values(rosters).flat());
+      if (!added) console.error(`matches: no members resolved for ${k} - check discords in the bracket`);
+    }
 
     await thread.send({
       embeds: [{
@@ -257,8 +274,11 @@ module.exports = function setupMatches(ctx) {
 
       // Match finished (every slot placed): archive the thread after a grace
       // period so only the active matches stay in the channel's thread list.
+      // Grand-final games share one thread - it only closes when the SERIES
+      // is over, not after game 1.
       const finished = pod.teams.length >= 2 && pod.teams.every((t) => t.name && t.placement);
-      if (finished && !entry.closed && !entry.closeAt) {
+      const holdForSeries = /^gf-\d+$/.test(pod.id) && !gfSeriesDecided(s);
+      if (finished && !holdForSeries && !entry.closed && !entry.closeAt) {
         const min = Number(CFG.threadCloseDelayMin);
         entry.closeAt = Date.now() + (isFinite(min) && min >= 0 ? min : 10) * 60 * 1000;
         save();
@@ -279,6 +299,23 @@ module.exports = function setupMatches(ctx) {
     }
   }
 
+  // Best-of-3 grand final: the series is over when a team has two game wins
+  // (or, for a legacy single-pod GF, when that one game is played).
+  function gfSeriesDecided(s) {
+    const games = (s.pods || []).filter((p) => p.phase === "gf")
+      .sort((a, b) => (parseInt((a.id.match(/-(\d+)$/) || [])[1] || "0", 10)) - (parseInt((b.id.match(/-(\d+)$/) || [])[1] || "0", 10)));
+    const wins = {};
+    let played = 0;
+    for (const g of games) {
+      const done = g.teams.length >= 2 && g.teams.every((t) => t.name && t.placement > 0);
+      if (!done) break;
+      played++;
+      const w = g.teams.find((t) => t.placement === 1);
+      if (w) { wins[w.name] = (wins[w.name] || 0) + 1; if (wins[w.name] >= 2) return true; }
+    }
+    return games.length === 1 && played === 1;
+  }
+
   // Archive sweep: runs on a timer so scheduled closes survive restarts
   // (closeAt is persisted). Archiving hides the thread from the channel's
   // active list - history stays browsable, and a moderator can always
@@ -289,6 +326,11 @@ module.exports = function setupMatches(ctx) {
     for (const entry of Object.values(store.threads)) {
       if (entry.closed || !entry.closeAt || entry.closeAt > now) continue;
       entry.closed = true;
+      // Series games share a thread: closing one game closes them all, and the
+      // goodbye message must not repeat per game.
+      for (const other of Object.values(store.threads)) {
+        if (other !== entry && other.threadId === entry.threadId) { other.closed = true; other.closeAt = null; }
+      }
       save();
       try {
         const thread = await client.channels.fetch(entry.threadId);

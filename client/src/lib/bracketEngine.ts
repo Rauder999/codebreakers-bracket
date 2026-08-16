@@ -411,7 +411,12 @@ export function propagate(
         const id = `gf-${i}`;
         let g = podMap.get(id);
         if (!g) {
-          g = { id, label: `GAME ${i + 1}`, phase: "gf", bracket: "gf", teams: [] };
+          // A streamed grand final is streamed for the WHOLE series: every new
+          // game inherits the previous game's onStream flag, so the bot never
+          // tells the finalists to self-host a lobby mid-series. liveNow is
+          // not inherited - the observer flips it per broadcast.
+          const prev = podMap.get(`gf-${i - 1}`) ?? g0;
+          g = { id, label: `GAME ${i + 1}`, phase: "gf", bracket: "gf", teams: [], onStream: prev.onStream };
           podMap.set(id, g);
         }
         g.teams = g0.teams.map((src, si) => {
