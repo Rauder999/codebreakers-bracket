@@ -62,8 +62,12 @@ Generates assign no maps at all. The **Grand Final is best-of-3**, visualised
 progressively: GAME 2 appears under GAME 1 once it is played, GAME 3 only on a
 1-1 tie; the champion is crowned in the deciding game (first to two wins). The
 engine's `propagate` drives this, so it works identically from bot results,
-`/tournament result`, and admin clicks — each GF game is a normal match to the
-bot (own thread, own map bans, own result submission).
+`/tournament result`, and admin clicks. Every game runs its own map bans and
+result submission, but **all games share ONE Discord thread** — the finalists
+stay put, game 2/3 bans simply appear below game 1 (the thread archives only
+when the series is over). A GF marked **on stream** stays streamed for every
+game of the series (each new game inherits the flag), so the bot never tells
+the finalists to self-host mid-series.
 
 **After:** admin app → **Archive** (freezes it into the public gallery), then
 **Delete** (removes the live session). Player stats live in the stats DB on the
