@@ -37,6 +37,11 @@ sessions, import registrations, start/archive/delete tournaments it owns.
    screenshots + confirmations + next-round pings.
 
 **If something goes wrong mid-tournament:**
+- Nobody has a screenshot / vision keeps failing: run **`/tournament result`**
+  inside the match's thread (moderators only). Buttons let you pick who
+  finished 1st, 2nd, ... — the last team's placement is implied. Applies through
+  the same pipeline as a confirmed screenshot: propagation, next-round pings
+  and thread auto-archive all follow.
 - Wrong/missing discords: fix them in the admin app Setup panel — the bot picks
   the change up live, quietly adds the right people to the existing thread.
   Nothing needs restarting.
