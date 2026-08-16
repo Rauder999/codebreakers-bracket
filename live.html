@@ -390,7 +390,9 @@
     .team-emoji { font-size: 12px; min-width: 16px; text-align: center; color: var(--cb-gold); }
     .team-name {
       flex: 1; font-family: var(--fd); font-weight: 600; font-size: 13px; letter-spacing: 0.02em;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      /* Long names wrap instead of getting ellipsised: connectors measure the
+         DOM after layout, so taller rows are safe. */
+      white-space: normal; overflow-wrap: anywhere; line-height: 1.25;
       position: relative;
     }
     .team-row.champion .team-name { color: var(--cb-gold); font-weight: 700; }

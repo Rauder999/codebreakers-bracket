@@ -48,6 +48,7 @@ module.exports = function setupMatches(ctx) {
 
   const armed = new Map();               // `${threadId}:${userId}` -> timestamp
   const byThread = new Map();            // threadId -> match key
+  const manualResults = new Map();       // userId -> in-progress /tournament result picker
   for (const [k, v] of Object.entries(store.threads)) if (v.threadId) byThread.set(v.threadId, k);
 
   const key = (code, podId) => `${code}:${podId}`;
@@ -382,6 +383,65 @@ module.exports = function setupMatches(ctx) {
     await respond("Screenshot read. The proposed result is posted here and is waiting for a moderator to confirm.");
   }
 
+  // ---- manual result entry (/tournament result) ---------------------------
+  // Moderator picks placements with buttons - the fallback when nobody has a
+  // screenshot. Applies through the same worker endpoint as the vision path,
+  // so propagation, next-round pings and thread auto-archive all behave
+  // exactly as if a screenshot had been confirmed.
+  const ORD = ["1st", "2nd", "3rd", "4th", "5th"];
+  function manualRows(teams, picks) {
+    const buttons = teams
+      .map((t, idx) => ({ t, idx }))
+      .filter(({ t }) => !picks.includes(t))
+      .map(({ t, idx }) => new ButtonBuilder()
+        .setCustomId(`cbmres:${idx}`)
+        .setLabel(t.length > 80 ? t.slice(0, 77) + "..." : t)
+        .setStyle(ButtonStyle.Primary));
+    const rows = [];
+    for (let n = 0; n < buttons.length; n += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(n, n + 5)));
+    return rows;
+  }
+
+  async function onManualPick(i) {
+    if (!isMod(i)) { await i.reply({ content: "Moderators only.", ephemeral: true }); return; }
+    const st = manualResults.get(i.user.id);
+    if (!st) { await i.reply({ content: "This picker expired (bot restarted?). Run **/tournament result** again.", ephemeral: true }); return; }
+    const idx = Number(i.customId.split(":")[1]);
+    const team = st.teams[idx];
+    if (!team || st.picks.includes(team)) { await i.deferUpdate(); return; }
+    st.picks.push(team);
+
+    // One team left unpicked = its placement is implied; time to apply.
+    if (st.picks.length >= st.teams.length - 1) {
+      st.picks.push(...st.teams.filter((t) => !st.picks.includes(t)));
+      manualResults.delete(i.user.id);
+      const placements = {};
+      st.picks.forEach((t, n) => { placements[t] = n + 1; });
+      const lines = st.picks.map((t, n) => `**${n + 1}.** ${t}`).join("\n");
+      try {
+        const res = await fetch(`${WORKER}/bot/result`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Bot-Secret": ENV.BOT_SECRET },
+          body: JSON.stringify({ code: st.code, podId: st.podId, placements, editor: `Mod: ${i.user.username}` }),
+        });
+        const data = await res.json();
+        if (!data.ok) { await i.update({ content: `Could not apply the result: ${data.error || res.status}`, components: [] }); return; }
+      } catch (e) {
+        await i.update({ content: `Could not apply the result: ${e.message}`, components: [] });
+        return;
+      }
+      await i.update({ content: `${CHECK} Result applied:\n${lines}`, components: [] });
+      try { await i.channel.send({ content: `${CHECK} Result entered manually by moderator **${i.user.username}**:\n${lines}` }); } catch { /* thread may be gone */ }
+      console.log(`matches: manual result for ${st.key} by ${i.user.username}: ${st.picks.join(" > ")}`);
+      return;
+    }
+
+    await i.update({
+      content: `Which team finished **${ORD[st.picks.length] || (st.picks.length + 1) + "th"}**?\nSo far: ${st.picks.map((t, n) => `${n + 1}. ${t}`).join("  \u00B7  ")}`,
+      components: manualRows(st.teams, st.picks),
+    });
+  }
+
   // /tournament - host-side setup. defaultMemberPermissions only hides the
   // command from players' pickers; a server admin can loosen that in the
   // integration settings, so the hard gate lives here.
@@ -415,6 +475,24 @@ module.exports = function setupMatches(ctx) {
       } catch (e) {
         await i.editReply(`Role sync failed: ${e.message}`);
       }
+      return;
+    }
+
+    if (sub === "result") {
+      const k = byThread.get(i.channelId);
+      const entry = k ? store.threads[k] : null;
+      if (!entry) { await i.reply({ content: "Run this inside the match's thread so I know which match you mean.", ephemeral: true }); return; }
+      const found = findMatchFor(entry, i.user.username);
+      if (!found) { await i.reply({ content: "The session for this match is no longer live.", ephemeral: true }); return; }
+      if (found.done) { await i.reply({ content: "This match already has a result. If it is wrong, fix the placements in the admin app.", ephemeral: true }); return; }
+      const teams = found.pod.teams.map((t) => t.name).filter(Boolean);
+      if (teams.length < 2) { await i.reply({ content: "This match does not have all its teams yet.", ephemeral: true }); return; }
+      manualResults.set(i.user.id, { key: k, code: entry.code, podId: entry.podId, teams, picks: [] });
+      await i.reply({
+        content: `Manual result for **${entry.label}** ${DASH} no screenshot needed.\nWhich team finished **1st**?`,
+        components: manualRows(teams, []),
+        ephemeral: true,
+      });
       return;
     }
 
@@ -509,6 +587,11 @@ module.exports = function setupMatches(ctx) {
           description: "Show watched tournaments, start state, bound channels",
           type: ApplicationCommandOptionType.Subcommand,
         },
+        {
+          name: "result",
+          description: "Enter this match's result manually, no screenshot (run inside the match thread)",
+          type: ApplicationCommandOptionType.Subcommand,
+        },
       ],
     };
     for (const g of client.guilds.cache.values()) {
@@ -519,7 +602,7 @@ module.exports = function setupMatches(ctx) {
 
   client.on("interactionCreate", (i) => {
     const p = i.isButton() ? i.customId.split(":")[0] : null;
-    const run = p === "cbmap" ? onBanClick(i) : p === "cbsub" ? onSubmitClick(i) : onSlash(i);
+    const run = p === "cbmap" ? onBanClick(i) : p === "cbsub" ? onSubmitClick(i) : p === "cbmres" ? onManualPick(i) : onSlash(i);
     Promise.resolve(run).catch((e) => console.error("matches interaction:", e.message));
   });
   client.on("messageCreate", (m) => { onMessage(m).catch((e) => console.error("matches onMessage:", e.message)); });
