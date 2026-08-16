@@ -907,12 +907,34 @@
         }));
     }
 
+    // ─── Grand-final Bo3 series (mirror of bracketEngine.gfSeries) ────────────
+    // The deciding game gets champion gold; earlier game wins render green.
+    function gfSeriesInfo(pods) {
+      const games = pods.filter(p => p.phase === "gf")
+        .sort((a, b) => (parseInt((a.id.match(/-(\d+)$/) || [])[1] || "0", 10)) - (parseInt((b.id.match(/-(\d+)$/) || [])[1] || "0", 10)));
+      const wins = {};
+      let playedCount = 0, champion = null, decidingId = null, lastWinner = null, lastPlayedId = null;
+      for (const g of games) {
+        const played = g.teams.length >= 2 && g.teams.every(t => t.name && t.placement > 0);
+        if (!played || champion) break;
+        playedCount++;
+        const w = g.teams.find(t => t.placement === 1);
+        if (!w) continue;
+        lastWinner = w.name; lastPlayedId = g.id;
+        wins[w.name] = (wins[w.name] || 0) + 1;
+        if (wins[w.name] >= 2) { champion = w.name; decidingId = g.id; }
+      }
+      const displayChampion = champion || (games.length === 1 && playedCount === 1 ? lastWinner : null);
+      return { displayChampion, decidingId: decidingId || (displayChampion ? lastPlayedId : null) };
+    }
+
     // ─── Team row renderer ────────────────────────────────────────────────────
-    function renderTeamRow(team, isGF, isDE, isLB, hasNoLBDrop, podSize) {
+    function renderTeamRow(team, isGF, isDE, isLB, hasNoLBDrop, podSize, gfDeciding) {
       const placement = team.placement || 0;
       const advanceCount = podSize / 2;
-      const isChampion = isGF && placement === 1 && team.name;
-      const isAdvancing = !isGF && placement >= 1 && placement <= advanceCount;
+      const isChampion = isGF && gfDeciding && placement === 1 && team.name;
+      const isAdvancing = (!isGF && placement >= 1 && placement <= advanceCount)
+        || (isGF && !gfDeciding && placement === 1 && team.name);
       const isDropping  = isDE && !isLB && !isGF && !hasNoLBDrop && placement > advanceCount && placement <= podSize;
       const isEliminated = !isGF && (
         (isLB && placement > advanceCount) ||
@@ -953,7 +975,7 @@
     }
 
     // ─── Pod renderer ─────────────────────────────────────────────────────────
-    function renderPod(pod, isGF, isDE, isLB) {
+    function renderPod(pod, isGF, isDE, isLB, gfDeciding) {
       const isLiveNow = !!pod.liveNow;
       const isOnStream = !!pod.onStream && !pod.liveNow;
       const podCls = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : "", isLiveNow ? "live-now" : "", isOnStream ? "on-stream" : ""].filter(Boolean).join(" ");
@@ -964,8 +986,10 @@
         ? ` <span class="stream-live-badge">&#9679; LIVE</span>`
         : isOnStream ? ` <span class="stream-live-badge" style="color:var(--cb-cyan)">&#9679;</span>` : "";
       html += `<div class="${headerCls}">${pod.label}${streamBadge}</div>`;
-      if (pod.map) html += `<div class="map-plate"><span class="map-name">${escHtml(pod.map)}</span></div>`;
-      for (const team of pod.teams) html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop, podSize);
+      html += pod.map
+        ? `<div class="map-plate"><span class="map-name">${escHtml(pod.map)}</span></div>`
+        : `<div class="map-plate"><span class="map-name" style="color:var(--cb-muted);opacity:0.7">MAP TBD</span></div>`;
+      for (const team of pod.teams) html += renderTeamRow(team, isGF, isDE, isLB, pod.hasNoLBDrop, podSize, gfDeciding);
       html += `</div>`;
       return html;
     }
@@ -974,6 +998,7 @@
     function renderBracket(pods, mode, size, opts) {
       const phases = groupPodsByPhase(pods, mode, size, opts);
       const isDE = mode === "double";
+      const gfInfo = gfSeriesInfo(pods);
       if (!isDE) {
         let html = `<div class="bracket-container"><div class="bracket-inner">`;
         phases.forEach((ph, i) => {
@@ -981,7 +1006,7 @@
           html += `<div class="bracket-phase">`;
           html += `<div class="phase-label">${ph.label}</div>`;
           html += `<div class="pods-column">`;
-          for (const pod of ph.pods) html += renderPod(pod, pod.phase === "gf", false, false);
+          for (const pod of ph.pods) html += renderPod(pod, pod.phase === "gf", false, false, pod.id === gfInfo.decidingId);
           html += `</div></div>`;
         });
         html += `</div></div>`;
@@ -1013,7 +1038,7 @@
         for (const ph of gfPhases) {
           html += `<div class="phase-label gf-phase-label" style="padding-bottom:12px">${ph.label}</div>`;
           html += `<div style="display:flex;flex-direction:column;gap:8px;align-items:center">`;
-          for (const pod of ph.pods) html += renderPod(pod, pod.phase === "gf", true, false);
+          for (const pod of ph.pods) html += renderPod(pod, pod.phase === "gf", true, false, pod.id === gfInfo.decidingId);
           html += `</div>`;
         }
         html += `</div>`;

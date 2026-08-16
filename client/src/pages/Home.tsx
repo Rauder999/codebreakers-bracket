@@ -17,6 +17,7 @@ import {
   buildInitialPods,
   propagate,
   getPhaseGraph,
+  gfSeries,
   getPhaseOrder,
   effectivePodSize,
   type Pod,
@@ -1102,7 +1103,9 @@ export default function Home() {
   };
 
   // Freeze the current tournament as an immutable server-side archive.
-  const archiveChampion = pods.find((p) => p.phase === "gf")?.teams.find((t) => t.placement === 1)?.name || null;
+  const gfGamePods = pods.filter((p) => p.phase === "gf").sort((a, b) => (parseInt(a.id.match(/-(\d+)$/)?.[1] ?? "0", 10)) - (parseInt(b.id.match(/-(\d+)$/)?.[1] ?? "0", 10)));
+  const gfInfo = gfSeries(gfGamePods);
+  const archiveChampion = gfInfo.displayChampion;
   const handleArchiveTournament = async () => {
     if (!adminToken) { toast.error("Sign in to archive a tournament"); return; }
     setArchiveBusy(true);
@@ -1882,7 +1885,7 @@ export default function Home() {
                 <div className="phase-label">{ph.label}</div>
                 <div className="pods-column">
                   {ph.pods.map((pod) => (
-                    <MatchPod key={pod.id} pod={pod} isGF={pod.phase === "gf"} isDE={false}
+                    <MatchPod key={pod.id} pod={pod} isGF={pod.phase === "gf"} isDE={false} gfDeciding={pod.id === gfInfo.decidingId}
                       onTeamClick={handleTeamClick} onMapClick={setMapPickerPod} onStreamToggle={togglePodStreaming} screenshotMode={screenshotMode} />
                   ))}
                 </div>
@@ -1942,7 +1945,7 @@ export default function Home() {
                       <div className="phase-label gf-phase-label" style={{ paddingBottom: 12 }}>{ph.label}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
                         {ph.pods.map((pod) => (
-                          <MatchPod key={pod.id} pod={pod} isGF={pod.phase === "gf"} isDE={true}
+                          <MatchPod key={pod.id} pod={pod} isGF={pod.phase === "gf"} isDE={true} gfDeciding={pod.id === gfInfo.decidingId}
                             onTeamClick={handleTeamClick} onMapClick={setMapPickerPod} onStreamToggle={togglePodStreaming} screenshotMode={screenshotMode} />
                         ))}
                       </div>
@@ -2378,13 +2381,16 @@ interface MatchPodProps {
   isGF: boolean;
   isDE: boolean;
   isLB?: boolean;
+  // True only for the GF game that decided the Bo3 series (or a legacy
+  // single-game GF): champion gold lives there and nowhere else.
+  gfDeciding?: boolean;
   onTeamClick: (podId: string, teamIdx: number) => void;
   onMapClick: (podId: string) => void;
   onStreamToggle: (podId: string) => void;
   screenshotMode: boolean;
 }
 
-function MatchPod({ pod, isGF, isDE, isLB, onTeamClick, onMapClick, onStreamToggle, screenshotMode }: MatchPodProps) {
+function MatchPod({ pod, isGF, isDE, isLB, gfDeciding, onTeamClick, onMapClick, onStreamToggle, screenshotMode }: MatchPodProps) {
   const podClass = ["match-pod", isGF ? "gf-pod" : "", isLB ? "lb-pod" : "", pod.liveNow ? "live-now" : "", pod.onStream && !pod.liveNow ? "on-stream" : ""].filter(Boolean).join(" ");
   const headerClass = ["pod-header", isGF ? "gf-header" : "", isLB ? "lb-header" : ""].filter(Boolean).join(" ");
 
@@ -2415,14 +2421,15 @@ function MatchPod({ pod, isGF, isDE, isLB, onTeamClick, onMapClick, onStreamTogg
         onClick={() => onMapClick(pod.id)}
         title="Click to change map"
       >
-        <span className="map-name">{pod.map ?? "- map -"}</span>
+        <span className="map-name" style={pod.map ? undefined : { color: "var(--cb-muted)", opacity: 0.7 }}>{pod.map || "MAP TBD"}</span>
       </div>
 
       {pod.teams.map((team, ti) => {
-        const isChampion = isGF && team.placement === 1 && !!team.name;
+        const isChampion = isGF && !!gfDeciding && team.placement === 1 && !!team.name;
         const podSize = pod.teams.length;
         const advanceCount = podSize / 2;
-        const isAdvancing = !isGF && team.placement >= 1 && team.placement <= advanceCount;
+        const isAdvancing = (!isGF && team.placement >= 1 && team.placement <= advanceCount)
+          || (isGF && !gfDeciding && team.placement === 1 && !!team.name); // Bo3 game win, series not over
         const isDropping = isDE && !isLB && !isGF && !pod.hasNoLBDrop && team.placement > advanceCount && team.placement <= podSize;
         const isEliminated = !isGF && (
           (isLB && team.placement > advanceCount) ||

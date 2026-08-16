@@ -229,7 +229,8 @@ export function buildInitialPods(
           bracket: phase.bracket,
           teams,
           hasNoLBDrop: phase.hasNoLBDrop,
-          map: pickMap(maps, rng),
+          // No pre-assigned map: the Discord ban phase (or the admin's map
+          // picker) decides it. Renderers show "MAP TBD" until then.
         });
       }
     } else {
@@ -241,7 +242,6 @@ export function buildInitialPods(
           bracket: phase.bracket,
           teams: emptySlots(podSize),
           hasNoLBDrop: phase.hasNoLBDrop,
-          map: pickMap(maps, rng),
         });
       }
     }
@@ -250,10 +250,6 @@ export function buildInitialPods(
   return pods;
 }
 
-function pickMap(maps: string[] | undefined, rng: () => number): string | undefined {
-  if (!maps || maps.length === 0) return undefined;
-  return maps[Math.floor(rng() * maps.length)];
-}
 
 // ─── Snake layout (stable index -> slot mapping) ──────────────────────────────
 // Returns array where layout[globalIndex] = { pod, pos }. Based on TOTAL count,
@@ -348,13 +344,16 @@ export function propagate(
     if (dest.isGroups) continue;
     const contribs = contributionsByDest.get(dest.id);
     if (!contribs) continue;
-    const destPods = podsByPhase(dest.id);
-    if (destPods.length === 0) continue;
     const destPodSize = effectivePodSize(dest, config);
+    const expectedPods = dest.id === "fbracket" ? 2 : Math.max(1, Math.ceil(dest.inputCount / destPodSize));
+    const destPods = podsByPhase(dest.id).slice(0, expectedPods);
+    if (destPods.length === 0) continue;
     const total = contribs.reduce((sum, c) => sum + c.count, 0);
     const layout = snakeLayout(total, destPods.length);
 
-    // Start every dest slot empty, then place decided teams at their fixed index.
+    // Only the graph-expected pods receive teams: the GF phase may carry extra
+    // Bo3 game pods (gf-1/gf-2, same phase) that are filled by the series step
+    // below, never by generic propagation.
     const newTeamsByPod: TeamSlot[][] = destPods.map(() =>
       Array.from({ length: destPodSize }, () => ({ name: "", placement: 0, seed: 0 } as TeamSlot))
     );
@@ -394,7 +393,71 @@ export function propagate(
     }
   }
 
+  // ─── Grand-final Bo3 series ─────────────────────────────────────────────────
+  // The GF is best-of-3, visualised progressively: game 2 appears under game 1
+  // once it is played; game 3 only on a 1-1 tie. Extra game pods share the "gf"
+  // phase (same rendering column) but are invisible to generic propagation
+  // (destPods sliced to the graph-expected count above). Removing or changing
+  // an upstream result shrinks the series back automatically.
+  {
+    const gfGames = podsByPhase("gf");
+    const g0 = gfGames[0];
+    if (g0 && g0.teams.length === 2 && g0.teams.every((t) => t.name)) {
+      const series = gfSeries(gfGames);
+      const desired = series.champion ? series.playedCount : Math.min(3, series.playedCount + 1);
+      for (const g of gfGames.slice(desired)) podMap.delete(g.id);
+      g0.label = desired > 1 ? "GAME 1" : "GRAND FINAL";
+      for (let i = 1; i < desired; i++) {
+        const id = `gf-${i}`;
+        let g = podMap.get(id);
+        if (!g) {
+          g = { id, label: `GAME ${i + 1}`, phase: "gf", bracket: "gf", teams: [] };
+          podMap.set(id, g);
+        }
+        g.teams = g0.teams.map((src, si) => {
+          const old = g!.teams[si];
+          const keep = old && old.name === src.name;
+          return { name: src.name, seed: src.seed, players: src.players, path: src.path, placement: keep ? old.placement : 0 };
+        });
+      }
+    } else if (g0) {
+      // Finalists not decided yet: no series pods, classic single GF pod.
+      for (const g of gfGames.slice(1)) podMap.delete(g.id);
+      g0.label = "GRAND FINAL";
+    }
+  }
+
   return Array.from(podMap.values());
+}
+
+// Best-of-3 series state over the GF game pods (pass them in game order).
+// Wins are counted over consecutive fully-played games. `champion` strictly
+// means two series wins (what propagation needs). `displayChampion` adds the
+// legacy case — a lone GF pod from a pre-Bo3 state or archive, where the
+// single game winner is the champion (renderers should use this one).
+export function gfSeries(gfGames: Pod[]): {
+  playedCount: number; champion: string | null; displayChampion: string | null;
+  decidingId: string | null; wins: Record<string, number>;
+} {
+  const wins: Record<string, number> = {};
+  let playedCount = 0, champion: string | null = null, decidingId: string | null = null;
+  let lastWinner: string | null = null, lastPlayedId: string | null = null;
+  for (const g of gfGames) {
+    const played = g.teams.length >= 2 && g.teams.every((t) => t.name && t.placement > 0);
+    if (!played || champion) break;
+    playedCount++;
+    const w = g.teams.find((t) => t.placement === 1);
+    if (!w) continue;
+    lastWinner = w.name; lastPlayedId = g.id;
+    wins[w.name] = (wins[w.name] || 0) + 1;
+    if (wins[w.name] >= 2) { champion = w.name; decidingId = g.id; }
+  }
+  const displayChampion = champion ?? (gfGames.length === 1 && playedCount === 1 ? lastWinner : null);
+  return {
+    playedCount, champion, displayChampion,
+    decidingId: decidingId ?? (displayChampion ? lastPlayedId : null),
+    wins,
+  };
 }
 
 function podIndex(podId: string): number {
