@@ -722,9 +722,20 @@
 
     // ─── Bracket fetch ────────────────────────────────────────────────────────
     // Render a serialized session state (shared by the HTTP fetch and the WS push).
+    // Unchanged states are NOT re-rendered: replacing the bracket's innerHTML
+    // resets the viewer's scroll position, and the poll fires every few
+    // seconds — people could never scroll a big bracket. Real changes keep the
+    // scroll by capturing and restoring it around the re-render.
+    let lastRenderKey = null;
     function applyState(stateStr) {
       let data;
       try { data = JSON.parse(stateStr); } catch { return; }
+      const renderKey = (currentSession || currentArchive || "") + "|" + stateStr;
+      if (renderKey === lastRenderKey) {
+        if (!currentArchive) { lastUpdated = new Date(); updateTimestamp(); }
+        return;
+      }
+      lastRenderKey = renderKey;
       const { pods, tournamentMode, tournamentSize, tournamentName, finalsBracket } = data;
       const label = currentSession || currentArchive || "";
       const nameEl = document.getElementById("tournamentNameEl");
@@ -737,8 +748,14 @@
         document.title = `${label} - Codebreakers ${currentArchive ? "Archive" : "Live"}`;
       }
       document.getElementById("headerSubtitle").textContent = label;
+      const oldContainer = document.querySelector(".bracket-container");
+      const keepX = oldContainer ? oldContainer.scrollLeft : 0;
+      const keepY = window.scrollY;
       document.getElementById("main").innerHTML =
         renderBracket(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket });
+      const newContainer = document.querySelector(".bracket-container");
+      if (newContainer && keepX) newContainer.scrollLeft = keepX;
+      if (keepY) window.scrollTo(window.scrollX, keepY);
       const badge = document.getElementById("liveBadge");
       badge.style.display = "inline-flex";
       if (currentArchive) {
@@ -750,8 +767,14 @@
         lastUpdated = new Date();
         updateTimestamp();
       }
-      // Draw connector lines after DOM settles
-      requestAnimationFrame(() => measureConnectors(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket }));
+      // Draw connector lines after DOM settles; connectors change layout, so
+      // pin the scroll once more afterwards.
+      requestAnimationFrame(() => {
+        measureConnectors(pods, tournamentMode || "single", tournamentSize || 16, { finalsBracket: !!finalsBracket });
+        const c = document.querySelector(".bracket-container");
+        if (c && keepX) c.scrollLeft = keepX;
+        if (keepY) window.scrollTo(window.scrollX, keepY);
+      });
     }
 
     async function fetchSession() {
@@ -793,6 +816,7 @@
 
 
     function showWaiting(msg) {
+      lastRenderKey = null; // main was replaced - next state must re-render
       document.getElementById("liveBadge").style.display = "none";
       document.getElementById("main").innerHTML = `
         <div class="waiting-screen">
