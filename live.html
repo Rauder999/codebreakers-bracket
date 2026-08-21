@@ -1250,6 +1250,14 @@
         btn.classList.toggle("active", _compactActive);
         btn.textContent = _compactActive ? "Normal" : "Compact";
       }
+      // The class flip resizes every pod - re-measure the connector overlay
+      // after the new layout settles, or the old lines float over wrong slots.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (_lastConnectorArgs) {
+          const { pods, mode, size, opts } = _lastConnectorArgs;
+          measureConnectors(pods, mode, size, opts);
+        }
+      }));
     }
 
     // ─── Timestamp updater ────────────────────────────────────────────────────
