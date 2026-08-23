@@ -56,6 +56,15 @@ sessions, import registrations, start/archive/delete tournaments it owns.
   (pings all moderators), then fix placements in the admin app.
 - `/tournament status` shows watched sessions, start state, bound channels.
 
+**Byes / walkovers (2026-08-23):** the CSV import pads short registrations
+with `TBD n` slots. Any FULL pod holding at most one real team (names not
+starting with TBD/BYE) resolves itself inside `propagate`: the real team takes
+1st, placeholders fill the rest — cascading through the losers bracket
+(a TBD that "drops" keeps conceding). Resolved walkover pods carry placements
+from the start, so the bot never pings or opens threads for them. Only pods
+with 2+ real teams plus a TBD (4-team formats) still need the admin to click
+the TBD into last place after the match.
+
 **Maps & the Bo3 Grand Final (2026-08-16):** brackets show **MAP TBD** until
 the Discord ban phase (or the admin's map picker) decides a match's map — new
 Generates assign no maps at all. The **Grand Final is best-of-3**, visualised
