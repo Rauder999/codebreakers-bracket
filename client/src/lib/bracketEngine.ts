@@ -273,7 +273,42 @@ function snakeLayout(total: number, podCount: number): { pod: number; pos: numbe
 // Each pod advances its top half and (DE WB) drops its bottom half.
 // A team's destination pod+slot is fixed by its SOURCE position, never by how many
 // results are currently decided. This prevents teams from jumping between pods.
+// TBD/BYE placeholders (the import pads short registrations with them) never
+// play: a full pod holding at most one real team resolves itself — the real
+// team takes 1st, placeholders fill the rest in order. Returns true if any
+// placement was written, so the caller knows to propagate again.
+function applyByes(pods: Pod[]): boolean {
+  const isBye = (n: string) => /^(TBD|BYE)\b/i.test(n.trim());
+  let changed = false;
+  for (const p of pods) {
+    if (p.teams.length < 2) continue;
+    if (!p.teams.every((t) => t.name)) continue;       // pod not formed yet
+    if (p.teams.some((t) => t.placement)) continue;    // already (partially) played
+    const real = p.teams.filter((t) => !isBye(t.name));
+    if (real.length > 1) continue;                     // an actual match
+    let place = 1;
+    if (real.length === 1) { real[0].placement = 1; place = 2; }
+    for (const t of p.teams) {
+      if (isBye(t.name)) { t.placement = place++ as TeamSlot["placement"]; }
+    }
+    changed = true;
+  }
+  return changed;
+}
+
 export function propagate(
+  pods: Pod[], size: Size, mode: TournamentMode, config: FormatConfig, opts?: EngineOptions
+): Pod[] {
+  // Byes cascade: resolving one walkover can form the next pod, which may be a
+  // walkover again (TBD vs TBD in the losers bracket) — loop until stable.
+  let cur = propagateOnce(pods, size, mode, config, opts);
+  for (let i = 0; i < 8 && applyByes(cur); i++) {
+    cur = propagateOnce(cur, size, mode, config, opts);
+  }
+  return cur;
+}
+
+function propagateOnce(
   pods: Pod[], size: Size, mode: TournamentMode, config: FormatConfig, opts?: EngineOptions
 ): Pod[] {
   const graph = getPhaseGraph(size, mode, opts);

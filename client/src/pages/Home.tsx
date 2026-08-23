@@ -210,91 +210,52 @@ function shortLabel(l: string): string {
     .replace("ROUND ", "R");
 }
 
-// Live SVG preview of the bracket structure. Green solid = advances to the next
-// round; orange dashed = losers dropping from a Winners block into the Losers
-// Bracket. N×K on a node means N matches of K teams each.
-function BracketPreview({ size, mode, opts, config }: { size: Size; mode: TournamentMode; opts: EngineOptions; config: FormatConfig }) {
-  const [hover, setHover] = useState<string | null>(null);
-  const graph = getPhaseGraph(size, mode, opts);
-  const psOf = (p: Parameters<typeof effectivePodSize>[0]) => effectivePodSize(p, config);
-  const pcOf = (p: Parameters<typeof effectivePodSize>[0]) => p.id === "fbracket" ? 2 : Math.max(1, Math.ceil(p.inputCount / psOf(p)));
-
-  const top = graph.filter((p) => p.bracket === "wb" || p.bracket === "gf");
-  const bot = graph.filter((p) => p.bracket === "lb");
-  // Roomier geometry — the preview panel is a proper sidebar now, so nodes can breathe.
-  const colW = 104, nodeW = 82, nodeH = 44, marginX = 16, topY = 40;
-  const botY = bot.length ? topY + 150 : topY;
-  type P = { x: number; y: number; w: number; h: number; cx: number; cy: number };
-  const pos: Record<string, P> = {};
-  top.forEach((p, i) => { const x = marginX + i * colW; pos[p.id] = { x, y: topY, w: nodeW, h: nodeH, cx: x + nodeW / 2, cy: topY + nodeH / 2 }; });
-  bot.forEach((p, i) => { const x = marginX + i * colW; pos[p.id] = { x, y: botY, w: nodeW, h: nodeH, cx: x + nodeW / 2, cy: botY + nodeH / 2 }; });
-  const width = marginX * 2 + Math.max(top.length, bot.length, 1) * colW;
-  const height = botY + nodeH + 16;
-
-  const adv: [string, string][] = [];
-  const drop: [string, string][] = [];
-  for (const p of graph) {
-    if (p.advanceTo && pos[p.advanceTo]) adv.push([p.id, p.advanceTo]);
-    if (mode === "double" && p.dropTo && !p.hasNoLBDrop && pos[p.dropTo]) drop.push([p.id, p.dropTo]);
-  }
-  const strokeFor = (b: string) => b === "gf" ? "#e8b64a" : b === "lb" ? "#ff8a3d" : "#7c5cff";
-
-  // Hover: light up the hovered node and the nodes its teams flow into.
-  const hoverPhase = hover ? graph.find((p) => p.id === hover) : null;
-  const lit = new Set<string>();
-  if (hoverPhase) {
-    lit.add(hoverPhase.id);
-    if (hoverPhase.advanceTo && pos[hoverPhase.advanceTo]) lit.add(hoverPhase.advanceTo);
-    if (mode === "double" && hoverPhase.dropTo && !hoverPhase.hasNoLBDrop && pos[hoverPhase.dropTo]) lit.add(hoverPhase.dropTo);
-  }
-
+// Live miniature of the REAL bracket: the same pods Generate will create,
+// rendered small. Team names come straight from the seed list, so the preview
+// fills in as you type.
+function BracketPreview({ size, mode, opts, config, seeds }: { size: Size; mode: TournamentMode; opts: EngineOptions; config: FormatConfig; seeds: SeedEntry[] }) {
+  const pods = useMemo(
+    () => buildInitialPods(size, seeds, mode, config, undefined, () => 0.5, opts),
+    [size, seeds, mode, config, opts]
+  );
+  const phases = groupPodsByPhase(pods, mode, size, opts);
+  const rows: { label: string | null; cols: typeof phases }[] = mode === "double"
+    ? [
+        { label: "WINNERS BRACKET \u2192 FINALS", cols: phases.filter((ph) => ph.bracket !== "lb") },
+        { label: "LOSERS BRACKET", cols: phases.filter((ph) => ph.bracket === "lb") },
+      ]
+    : [{ label: null, cols: phases }];
+  const borderFor = (b?: string) => b === "gf" ? "rgba(232,182,74,0.55)" : b === "lb" ? "rgba(255,138,61,0.5)" : "var(--cb-border2)";
+  const labelColor = (b?: string) => b === "gf" ? "var(--cb-gold)" : b === "lb" ? "var(--cb-orange)" : "var(--cb-purple2)";
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: "block" }} fontFamily="'IBM Plex Mono', monospace">
-        <text x={marginX} y={topY - 14} fill="#a48fff" fontSize={9} letterSpacing={2}>WINNERS BRACKET → FINALS</text>
-        {bot.length > 0 && <text x={marginX} y={botY - 14} fill="#ff8a3d" fontSize={9} letterSpacing={2}>LOSERS BRACKET</text>}
-        {adv.map(([a, b], i) => {
-          const s = pos[a], t = pos[b];
-          const hot = hover === a;
-          const dim = hover !== null && !hot;
-          return <path key={"a" + i} d={`M ${s.x + s.w} ${s.cy} C ${s.x + s.w + 22} ${s.cy}, ${t.x - 22} ${t.cy}, ${t.x} ${t.cy}`}
-            stroke="#28d17c" strokeWidth={hot ? 2.6 : 1.4} fill="none"
-            opacity={dim ? 0.12 : hot ? 1 : 0.6}
-            style={{ filter: hot ? "drop-shadow(0 0 4px rgba(40,209,124,0.7))" : undefined, transition: "opacity 120ms, stroke-width 120ms" }} />;
-        })}
-        {drop.map(([a, b], i) => {
-          const s = pos[a], t = pos[b]; const my = (s.y + s.h + t.y) / 2;
-          const hot = hover === a;
-          const dim = hover !== null && !hot;
-          return <path key={"d" + i} d={`M ${s.cx} ${s.y + s.h} C ${s.cx} ${my}, ${t.cx} ${my}, ${t.cx} ${t.y}`}
-            stroke="#ff8a3d" strokeWidth={hot ? 2.4 : 1.4} strokeDasharray="4 3" fill="none"
-            opacity={dim ? 0.12 : hot ? 1 : 0.8}
-            style={{ filter: hot ? "drop-shadow(0 0 4px rgba(255,138,61,0.7))" : undefined, transition: "opacity 120ms, stroke-width 120ms" }} />;
-        })}
-        {graph.map((p) => {
-          const n = pos[p.id]; if (!n) return null;
-          const c = strokeFor(p.bracket);
-          const isLit = lit.has(p.id);
-          const dim = hover !== null && !isLit;
-          return (
-            <g key={p.id} onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)} style={{ cursor: "pointer" }}>
-              <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={0}
-                fill={isLit ? c + "3a" : c + "1e"} stroke={c}
-                strokeWidth={isLit ? 1.8 : 1}
-                opacity={dim ? 0.35 : 1}
-                style={{ filter: hover === p.id ? `drop-shadow(0 0 6px ${c}aa)` : undefined, transition: "all 120ms" }} />
-              <text x={n.cx} y={n.y + 17} textAnchor="middle" fill="#dfe3ef" fontSize={8} opacity={dim ? 0.4 : 1}>{shortLabel(p.label)}</text>
-              <text x={n.cx} y={n.y + 33} textAnchor="middle" fill={c === "#7c5cff" ? "#a48fff" : c} fontSize={11} fontWeight={600} opacity={dim ? 0.4 : 1}>{pcOf(p)}×{psOf(p)}</text>
-            </g>
-          );
-        })}
-      </svg>
-      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 10, color: "var(--cb-muted)" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><svg width={20} height={4}><line x1={0} y1={2} x2={20} y2={2} stroke="#28d17c" strokeWidth={2.4} /></svg>advances</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><svg width={20} height={4}><line x1={0} y1={2} x2={20} y2={2} stroke="#ff8a3d" strokeWidth={2.4} strokeDasharray="4 3" /></svg>drops to losers</span>
+      <div style={{ maxHeight: 460, overflow: "auto", paddingRight: 4 }}>
+        {rows.map((row, ri) => row.cols.length > 0 && (
+          <div key={ri} style={{ marginTop: ri > 0 ? 14 : 0 }}>
+            {row.label && (
+              <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 8.5, letterSpacing: "0.18em", color: ri > 0 ? "var(--cb-orange)" : "var(--cb-purple2)", marginBottom: 6 }}>{row.label}</div>
+            )}
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              {row.cols.map((ph) => (
+                <div key={ph.phase} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 96, flexShrink: 0 }}>
+                  <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 7.5, letterSpacing: "0.14em", color: labelColor(ph.bracket), textAlign: "center", whiteSpace: "nowrap" }}>{shortLabel(ph.label)}</div>
+                  {ph.pods.map((pod) => (
+                    <div key={pod.id} style={{ border: `1px solid ${borderFor(pod.bracket)}`, background: "var(--cb-panel)" }}>
+                      {pod.teams.map((t, ti) => (
+                        <div key={ti} style={{ display: "flex", gap: 4, alignItems: "center", padding: "2px 6px", borderTop: ti > 0 ? "1px solid rgba(255,255,255,0.05)" : "none", fontSize: 8.5, fontFamily: "var(--cb-font-mono)", whiteSpace: "nowrap", overflow: "hidden" }}>
+                          <span style={{ color: "var(--cb-muted)", opacity: 0.7, minWidth: 16, flexShrink: 0 }}>{t.seed > 0 ? `#${t.seed}` : ""}</span>
+                          <span style={{ color: t.name ? "var(--cb-text)" : "var(--cb-muted)", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 76 }}>{t.name || "\u00b7 \u00b7 \u00b7"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
-      <div style={{ fontFamily: "var(--cb-font-mono)", fontSize: 9.5, color: "var(--cb-purple2)", opacity: 0.85, marginTop: 10, lineHeight: 1.5, letterSpacing: "0.03em" }}>▸ Hover a match to trace where its teams go.</div>
-      <div style={{ fontSize: 10, color: "var(--cb-muted)", opacity: 0.7, marginTop: 4, lineHeight: 1.4 }}>Teams fill in after you generate.</div>
+      <div style={{ fontSize: 10, color: "var(--cb-muted)", opacity: 0.7, marginTop: 10, lineHeight: 1.4 }}>This is the exact bracket Generate will create \u2014 team names fill in as you type them.</div>
     </div>
   );
 }
@@ -1024,7 +985,8 @@ export default function Home() {
   const handleGenerate = () => {
     const normalised = [...seeds].sort((a, b) => a.seed - b.seed).map((s, i) => ({ ...s, seed: i + 1 }));
     const cfg = resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts);
-    const initial = buildInitialPods(tournamentSize, normalised, tournamentMode, cfg, MAP_NAMES, undefined, engineOpts);
+    // propagate right away so TBD/BYE walkovers resolve before anyone plays
+    const initial = propagate(buildInitialPods(tournamentSize, normalised, tournamentMode, cfg, MAP_NAMES, undefined, engineOpts), tournamentSize, tournamentMode, cfg, engineOpts);
     setPods(initial);
     undoStack.current = [];
     redoStack.current = [];
@@ -1091,7 +1053,7 @@ export default function Home() {
   const handleReset = () => {
     const normalised = [...seeds].sort((a, b) => a.seed - b.seed).map((s, i) => ({ ...s, seed: i + 1 }));
     const cfg = resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts);
-    const fresh = buildInitialPods(tournamentSize, normalised, tournamentMode, cfg, MAP_NAMES, undefined, engineOpts);
+    const fresh = propagate(buildInitialPods(tournamentSize, normalised, tournamentMode, cfg, MAP_NAMES, undefined, engineOpts), tournamentSize, tournamentMode, cfg, engineOpts);
     // Preserve the maps that are currently assigned - reset clears progress, not maps.
     const currentMaps = new Map(pods.map((p) => [p.id, p.map]));
     const withMaps = fresh.map((p) => ({ ...p, map: currentMaps.get(p.id) ?? p.map }));
@@ -1551,7 +1513,7 @@ export default function Home() {
                 <span className="cb-chip" style={{ borderColor: "rgba(124,92,255,0.4)", color: "var(--cb-purple2)" }}>{globalFormat === 4 ? "CASH-OUT" : "FINAL RND"}</span>
               </div>
               <div style={{ padding: "16px 18px 18px" }}>
-                <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
+                <BracketPreview size={tournamentSize} mode={tournamentMode} opts={engineOpts} seeds={seeds} config={resolveConfig(tournamentSize, tournamentMode, globalFormat, formatConfig, engineOpts)} />
               </div>
             </div>
           )}
