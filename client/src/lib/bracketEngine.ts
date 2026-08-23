@@ -282,10 +282,13 @@ function applyByes(pods: Pod[]): boolean {
   let changed = false;
   for (const p of pods) {
     if (p.teams.length < 2) continue;
-    if (!p.teams.every((t) => t.name)) continue;       // pod not formed yet
-    if (p.teams.some((t) => t.placement)) continue;    // already (partially) played
+    if (!p.teams.every((t) => t.name)) continue;          // pod not formed yet
     const real = p.teams.filter((t) => !isBye(t.name));
-    if (real.length > 1) continue;                     // an actual match
+    if (real.length > 1) continue;                        // an actual match
+    if (real.some((t) => t.placement)) continue;          // real team already placed
+    if (p.teams.every((t) => t.placement)) continue;      // fully resolved already
+    // Stray placements on the BYE side (an admin clicking a TBD row) must not
+    // block the walkover - overwrite them with the canonical resolution.
     let place = 1;
     if (real.length === 1) { real[0].placement = 1; place = 2; }
     for (const t of p.teams) {
