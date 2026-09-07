@@ -473,6 +473,26 @@ module.exports = function setupMatches(ctx) {
     await respond("Screenshot read. The proposed result is posted here and is waiting for a moderator to confirm.");
   }
 
+  // ---- channel binding report ---------------------------------------------
+  // The admin app refuses to start an unbound tournament (it would spam the
+  // bot's default channel). The worker learns bindings from us: on every
+  // /tournament bind, and once at startup for bindings made before this
+  // feature existed.
+  function reportBinding(code, channelId, channelName) {
+    fetch(`${WORKER}/bot/binding`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Bot-Secret": ENV.BOT_SECRET },
+      body: JSON.stringify({ code, channelId, channelName: channelName || null }),
+    }).then((r) => r.json())
+      .then((d) => { if (!d.ok) console.error(`matches: binding report for ${code} rejected:`, d.error); })
+      .catch((e) => console.error(`matches: binding report for ${code} failed:`, e.message));
+  }
+  client.once("clientReady", () => {
+    setTimeout(() => {
+      for (const [code, channelId] of Object.entries(store.channels)) reportBinding(code, channelId, null);
+    }, 10000);
+  });
+
   // ---- manual result entry (/tournament result) ---------------------------
   // Moderator picks placements with buttons - the fallback when nobody has a
   // screenshot. Applies through the same worker endpoint as the vision path,
@@ -550,6 +570,7 @@ module.exports = function setupMatches(ctx) {
       }
       store.channels[code] = i.channelId;
       save();
+      reportBinding(code, i.channelId, i.channel && i.channel.name ? i.channel.name : null);
       await i.reply({ content: `Bound tournament **${code}** to this channel. Match announcements and private threads will be created here.`, ephemeral: true });
       return;
     }

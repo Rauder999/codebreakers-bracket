@@ -445,6 +445,22 @@ export default {
       }));
     }
 
+    // ── Bot: record the /tournament bind target ────────────────────────────
+    if (path === "/bot/binding" && method === "POST") {
+      if (!env.BOT_SECRET || request.headers.get("X-Bot-Secret") !== env.BOT_SECRET) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      const code = String(body.code || "").toUpperCase();
+      if (!code || !body.channelId) return json({ ok: false, error: "code, channelId required" }, 400);
+      const stub = env.SESSION_ROOM.get(env.SESSION_ROOM.idFromName(code));
+      return stub.fetch(new Request(`https://do/session/${code}/bot-binding`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: body.channelId, channelName: body.channelName || null }),
+      }));
+    }
+
     // ── Session routes -> Durable Object ───────────────────────────────────
     const m = path.match(/^\/session\/([A-Za-z0-9\-]+)(\/ws|\/owner)?$/);
     if (m) {
@@ -541,6 +557,19 @@ export class SessionRoom {
       return json({ ok: true, version: this._doc.version, map: pod.map });
     }
 
+    // Internal: /tournament bind target reported by the bot, so the admin app
+    // can refuse to start a tournament that would spam the default channel.
+    if (tail === "bot-binding" && method === "POST") {
+      let body; try { body = await request.json(); } catch { return json({ ok: false, error: "Bad JSON" }, 400); }
+      if (!this._doc) return json({ ok: false, error: "Session not found" }, 404);
+      await this.saveDoc({
+        ...this._doc,
+        boundChannel: String(body.channelId),
+        boundChannelName: body.channelName ? String(body.channelName).slice(0, 100) : null,
+      });
+      return json({ ok: true });
+    }
+
     // Internal: bot-verified match result. Reached only via the worker's
     // /bot/result route (public /session/:code router never forwards this tail).
     if (tail === "bot-result" && method === "POST") {
@@ -595,7 +624,7 @@ export class SessionRoom {
     if (method === "GET") {
       if (!this._doc) return json({ ok: false, error: "Session not found" }, 404);
       const d = this._doc;
-      return json({ ok: true, state: d.state, version: d.version, lastEditor: d.lastEditor, name: d.name, size: d.size, mode: d.mode, owner: d.owner || null, updatedAt: d.updatedAt });
+      return json({ ok: true, state: d.state, version: d.version, lastEditor: d.lastEditor, name: d.name, size: d.size, mode: d.mode, owner: d.owner || null, boundChannel: d.boundChannel || null, boundChannelName: d.boundChannelName || null, updatedAt: d.updatedAt });
     }
 
     if (method === "PUT") {
@@ -634,6 +663,10 @@ export class SessionRoom {
       size: (meta && meta.size) ?? (prev && prev.size) ?? null,
       mode: (meta && meta.mode) ?? (prev && prev.mode) ?? null,
       owner: owner ?? (prev && prev.owner) ?? null,
+      // Discord channel binding is bot-reported metadata - survives full-state
+      // rewrites untouched.
+      boundChannel: (prev && prev.boundChannel) || null,
+      boundChannelName: (prev && prev.boundChannelName) || null,
       updatedAt: new Date().toISOString(),
     };
     await this.saveDoc(doc);

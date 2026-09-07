@@ -275,6 +275,8 @@ export default function Home() {
   // bot stays silent (no pings, no match threads).
   const [tournamentStarted, setTournamentStarted] = useState<boolean>(_as?.tournamentStarted ?? false);
   const [showStartConfirm, setShowStartConfirm] = useState(false);
+  // Discord channel binding for the Start dialog: bot-reported via the worker.
+  const [startBinding, setStartBinding] = useState<{ checked: boolean; channel: string | null }>({ checked: false, channel: null });
   const [globalFormat, setGlobalFormat] = useState<PodSize>(_as?.globalFormat ?? 4);
   const [finalsBracket, setFinalsBracket] = useState<boolean>(_as?.finalsBracket ?? false);
   const engineOpts = useMemo(() => ({ finalsBracket }), [finalsBracket]);
@@ -2096,7 +2098,17 @@ export default function Home() {
           <button className="cb-btn success" onClick={handleExportPng}>Export PNG</button>
           <button className="cb-btn warn" onClick={() => setShowSavePanel(true)}>Saves</button>
           {adminToken && !tournamentStarted && sessionCode && (
-            <button className="cb-btn" style={{ borderColor: "var(--cb-green)", color: "var(--cb-green)", fontWeight: 700 }} onClick={() => setShowStartConfirm(true)}>Start Tournament</button>
+            <button className="cb-btn" style={{ borderColor: "var(--cb-green)", color: "var(--cb-green)", fontWeight: 700 }} onClick={() => {
+              // The bot must know which channel this tournament lives in
+              // BEFORE the starting gun, or it falls back to its default
+              // channel and spams the wrong place.
+              setStartBinding({ checked: false, channel: null });
+              setShowStartConfirm(true);
+              fetch(`${WORKER_URL}/session/${sessionCode}`)
+                .then((r) => r.json() as Promise<{ boundChannel?: string | null; boundChannelName?: string | null }>)
+                .then((d) => setStartBinding({ checked: true, channel: d.boundChannel ? (d.boundChannelName ? `#${d.boundChannelName}` : `channel ${d.boundChannel}`) : null }))
+                .catch(() => setStartBinding({ checked: true, channel: null }));
+            }}>Start Tournament</button>
           )}
           {tournamentStarted && (
             <span className="cb-chip" style={{ fontFamily: "var(--cb-font-mono)", fontSize: 10, letterSpacing: "0.1em", color: "var(--cb-green)", border: "1px solid rgba(40,209,124,0.5)", padding: "3px 8px" }}>STARTED</span>
@@ -2161,12 +2173,26 @@ export default function Home() {
         <div className="cb-modal-backdrop" style={{ zIndex: 1100 }} onClick={() => setShowStartConfirm(false)}>
           <div className="cb-modal" style={{ padding: 24, minWidth: 380, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div className="cb-modal-title" style={{ color: "var(--cb-green)", marginBottom: 12 }}>Start Tournament</div>
-            <div style={{ fontSize: 13, color: "var(--cb-text)", lineHeight: 1.6, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: "var(--cb-text)", lineHeight: 1.6, marginBottom: 12 }}>
               The Discord bot will immediately ping every round-1 team and open their private match threads (map bans, lobby setup, result submission). Until you start, the bot stays silent.
             </div>
+            {!startBinding.checked ? (
+              <div style={{ fontSize: 12, color: "var(--cb-muted)", marginBottom: 14 }}>Checking Discord channel binding...</div>
+            ) : startBinding.channel ? (
+              <div style={{ fontSize: 12.5, color: "var(--cb-green)", marginBottom: 14 }}>✓ Bound to {startBinding.channel} — pings and threads go there.</div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--cb-red)", border: "1px solid rgba(255,77,94,0.4)", background: "rgba(255,77,94,0.07)", padding: "10px 12px", lineHeight: 1.55, marginBottom: 14 }}>
+                <b>This tournament is not bound to any Discord channel.</b> The bot would fall back to its default channel and spam the wrong place. In the tournament channel, run <span style={{ fontFamily: "var(--cb-font-mono)" }}>/tournament bind code:{sessionCode}</span>, then reopen this dialog.
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="cb-btn ghost" onClick={() => setShowStartConfirm(false)}>Cancel</button>
-              <button className="cb-btn" style={{ borderColor: "var(--cb-green)", color: "var(--cb-green)" }} onClick={handleStartTournament}>Start — ping the teams</button>
+              {startBinding.checked && !startBinding.channel && (
+                <button className="cb-btn" style={{ borderColor: "var(--cb-orange)", color: "var(--cb-orange)", fontSize: 11 }} onClick={handleStartTournament} title="Only if you know the default channel is right">Start anyway — use default channel</button>
+              )}
+              {startBinding.checked && startBinding.channel && (
+                <button className="cb-btn" style={{ borderColor: "var(--cb-green)", color: "var(--cb-green)" }} onClick={handleStartTournament}>Start — ping the teams</button>
+              )}
             </div>
           </div>
         </div>
