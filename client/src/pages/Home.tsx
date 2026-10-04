@@ -405,6 +405,12 @@ export default function Home() {
   // Keep editorNameRef and tournamentNameRef in sync
   useEffect(() => { editorNameRef.current = editorName; }, [editorName]);
   useEffect(() => { tournamentNameRef.current = tournamentName; }, [tournamentName]);
+  // doPutSession has [] deps, so it must read size/mode through refs — reading the
+  // state directly froze them at their mount-time defaults (gallery showed "16 teams").
+  const tournamentSizeRef = useRef(tournamentSize);
+  const tournamentModeRef = useRef(tournamentMode);
+  useEffect(() => { tournamentSizeRef.current = tournamentSize; }, [tournamentSize]);
+  useEffect(() => { tournamentModeRef.current = tournamentMode; }, [tournamentMode]);
 
   // Team list
 
@@ -678,8 +684,8 @@ export default function Home() {
           state: stateStr,
           editor: editorNameRef.current || "Operator",
           name: tournamentNameRef.current || `${editorNameRef.current || "Operator"}'s Tournament`,
-          size: tournamentSize,
-          mode: tournamentMode,
+          size: tournamentSizeRef.current,
+          mode: tournamentModeRef.current,
         }),
       });
       if (res.ok) {
