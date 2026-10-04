@@ -56,6 +56,17 @@ sessions, import registrations, start/archive/delete tournaments it owns.
   (pings all moderators), then fix placements in the admin app.
 - `/tournament status` shows watched sessions, start state, bound channels.
 
+**2026-10-04 batch:** (1) screenshot media type is now sniffed from magic
+bytes — Discord's attachment contentType lied nine times during CBL004
+("image/webp but appears to be image/png" API rejections, each needing a
+manual result). (2) Walkover pods now get a **bye announcement**: the real
+team is pinged once ("free pass — you advance automatically"), dedup
+persisted in `state.json` (`byes`). (3) `/tournament bind` reports the
+binding to the worker (`POST /bot/binding`) and backfills all stored
+bindings 10s after startup — the admin app's Start dialog shows the bound
+channel and refuses to start unbound tournaments. (4) The SSH gate moved:
+**port 22** (not 2222), edge rly.playrservers.com.
+
 **Byes / walkovers (2026-08-23):** the CSV import pads short registrations
 with `TBD n` slots. Any FULL pod holding at most one real team (names not
 starting with TBD/BYE) resolves itself inside `propagate`: the real team takes

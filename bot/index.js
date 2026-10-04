@@ -122,6 +122,49 @@ async function onState(code, entry, stateStr) {
     try { await matchesApi.onStateUpdate(code, s); }
     catch (e) { console.error("matches roster sync:", e.message); }
   }
+
+  // Walkover pods (a real team drew a TBD/BYE placeholder) get no thread and
+  // no match ping - but the team deserves to hear it advanced. Once per pod,
+  // dedup persisted like regular announcements.
+  if (!persisted.byes) persisted.byes = {};
+  if (!persisted.byes[code]) persisted.byes[code] = [];
+  const byeSeen = new Set(persisted.byes[code]);
+  const isByeName = (n) => /^(TBD|BYE)\b/i.test(String(n || "").trim());
+  for (const pod of s.pods) {
+    if (byeSeen.has(pod.id)) continue;
+    if (!pod.teams || pod.teams.length < 2) continue;
+    if (!pod.teams.every((t) => t.name && t.placement > 0)) continue;
+    const real = pod.teams.filter((t) => !isByeName(t.name));
+    if (real.length !== 1 || !pod.teams.some((t) => isByeName(t.name))) continue;
+    byeSeen.add(pod.id);
+    persisted.byes[code] = [...byeSeen];
+    savePersisted();
+    await announceBye(code, s, pod, real[0]);
+  }
+}
+
+async function announceBye(code, s, pod, team) {
+  const g = await mainGuild();
+  const byTeam = new Map((s.seeds || []).map((sd) => [sd.name, sd.discords || []]));
+  const mentions = [];
+  for (const d of splitDiscords(byTeam.get(team.name))) {
+    const m = g ? findMember(g, d) : null;
+    mentions.push(m ? `<@${m.id}>` : `@${norm(d)}`);
+  }
+  const channelId = (matchesApi && matchesApi.channelFor) ? matchesApi.channelFor(code) : CFG.announceChannelId;
+  if (!channelId) return;
+  const TICKET = "\uD83C\uDFAB", DASH = "\u2014";
+  console.log(`[${code}] bye announce ${pod.id}: ${team.name}`);
+  try {
+    const ch = await client.channels.fetch(channelId);
+    await ch.send({ content: mentions.join(" "), embeds: [{
+      title: `${TICKET}  ${pod.label} ${DASH} free pass`,
+      description: `**${team.name}** advances automatically ${DASH} no opponent this round. Sit tight, your next match will be announced here as usual.`,
+      color: 0x28d17c,
+      footer: { text: "CODEBREAKERS \u00B7 live bracket" },
+      timestamp: new Date().toISOString(),
+    }] });
+  } catch (e) { console.error("bye announce failed:", e.message); }
 }
 
 async function announce(code, s, pod) {

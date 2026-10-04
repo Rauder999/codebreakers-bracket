@@ -70,6 +70,17 @@ module.exports = function setupResults(ctx) {
     return null;
   }
 
+  // Discord's attachment contentType lies: during CBL004 nine screenshots
+  // died with "specified image/webp but appears to be image/png" API errors.
+  // Trust the file's magic bytes, never the header.
+  function sniffImageType(buf) {
+    if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+    if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+    if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+    if (buf.length >= 3 && buf.toString("ascii", 0, 3) === "GIF") return "image/gif";
+    return null;
+  }
+
   async function analyze(att, found) {
     const { state: s, pod } = found;
     const res = await fetch(att.url);
@@ -84,7 +95,7 @@ module.exports = function setupResults(ctx) {
       anthropic,
       model: CFG.model || "claude-opus-5",
       buf,
-      mediaType: (att.contentType || "").split(";")[0] || "image/png",
+      mediaType: sniffImageType(buf) || (att.contentType || "").split(";")[0] || "image/png",
       rosters: rosterHints(rosters),
       expectedTeams: pod.teams.map((t) => t.name),
       scheduledMap: pod.map || null,
